@@ -1,0 +1,8 @@
+Name: cart.rpc
+ListenOn: 0.0.0.0:8080
+Etcd:
+  Hosts:
+    - etcd:2379
+  Key: cart.rpc
+RedisHost: redis:6379
+RedisPass: redis123456

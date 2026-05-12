@@ -1,0 +1,131 @@
+syntax = "proto3";
+
+package pb;
+option go_package = "./pb";
+
+// 商品基础信息实体
+message ProductItem {
+  int64 id = 1;
+  string name = 2;
+  string desc = 3;
+  int64 price = 4; // 价格(单位: 分)
+  string image_url = 5; // 商品图片URL
+  int64 category_id = 6; // 分类ID
+  string category_name = 7; // 分类名称
+  int32 stock = 8; // 库存数量
+}
+
+message GetProductReq {
+  int64 id = 1;
+}
+
+message GetProductResp {
+  ProductItem product = 1;
+}
+
+// 获取商品列表 (无分页，简单版演示)
+message ListProductReq {}
+
+message ListProductResp {
+  repeated ProductItem products = 1; // repeated 相当于 Go 里的 slice (切片)
+}
+
+// 添加商品
+message AddProductReq {
+  string name = 1;
+  string desc = 2;
+  int64 price = 3; // 价格(单位: 分)
+  int32 stock = 4;  // 初始库存
+  string image_url = 5; // 商品图片URL
+  int64 category_id = 6; // 分类ID
+}
+
+message AddProductResp {
+  int64 id = 1;
+  string message = 2;
+}
+
+// 更新商品
+message UpdateProductReq {
+  int64 id = 1;
+  string name = 2;
+  string desc = 3;
+  int64 price = 4;
+  string image_url = 5;
+  int64 category_id = 6;
+}
+
+message UpdateProductResp {
+  bool success = 1;
+  string message = 2;
+}
+
+// 删除商品
+message DeleteProductReq {
+  int64 id = 1;
+}
+
+message DeleteProductResp {
+  bool success = 1;
+  string message = 2;
+}
+
+// 获取商品列表(分页版)
+message ListProductByPageReq {
+  int64 category_id = 1; // 分类ID筛选
+  string keyword = 2; // 搜索关键词
+  int32 page = 3; // 页码
+  int32 page_size = 4; // 每页数量
+}
+
+message ListProductByPageResp {
+  repeated ProductItem products = 1;
+  int32 total = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+}
+
+// 商品分类
+message Category {
+  int64 id = 1;
+  string name = 2;
+  string icon = 3; // 分类图标
+  int32 sort = 4; // 排序
+}
+
+message GetCategoriesReq {}
+
+message GetCategoriesResp {
+  repeated Category categories = 1;
+}
+
+// 添加分类
+message AddCategoryReq {
+  string name = 1;
+  string icon = 2;
+  int32 sort = 3;
+}
+
+message AddCategoryResp {
+  int64 id = 1;
+  string message = 2;
+}
+
+service Product {
+  // 获取商品详情 (这个接口后面我们会做 Redis 高并发缓存)
+  rpc GetProduct(GetProductReq) returns(GetProductResp);
+  // 获取商品列表
+  rpc ListProduct(ListProductReq) returns(ListProductResp);
+  // 添加商品
+  rpc AddProduct(AddProductReq) returns(AddProductResp);
+  // 更新商品
+  rpc UpdateProduct(UpdateProductReq) returns(UpdateProductResp);
+  // 删除商品
+  rpc DeleteProduct(DeleteProductReq) returns(DeleteProductResp);
+  // 分页获取商品列表
+  rpc ListProductByPage(ListProductByPageReq) returns(ListProductByPageResp);
+  // 获取商品分类
+  rpc GetCategories(GetCategoriesReq) returns(GetCategoriesResp);
+  // 添加商品分类
+  rpc AddCategory(AddCategoryReq) returns(AddCategoryResp);
+}

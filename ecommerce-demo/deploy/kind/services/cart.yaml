@@ -1,0 +1,73 @@
+# =============================================================================
+# Cart RPC Service Deployment (K8s native - no Etcd)
+# =============================================================================
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cart-config
+  namespace: ecommerce
+data:
+  cart.yaml: |
+    Name: cart.rpc
+    ListenOn: 0.0.0.0:8083
+    # K8s native service discovery - no Etcd needed
+    RedisConf:
+      Host: redis:6379
+      Type: node
+      Pass: "redis123456"
+      DB: 0
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cart
+  namespace: ecommerce
+spec:
+  type: ClusterIP
+  selector:
+    app: cart
+  ports:
+    - name: grpc
+      port: 8083
+      targetPort: 8083
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cart
+  namespace: ecommerce
+  labels:
+    app: cart
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: cart
+  template:
+    metadata:
+      labels:
+        app: cart
+    spec:
+      containers:
+        - name: cart
+          image: ecommerce-cart:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8083
+              name: grpc
+          volumeMounts:
+            - name: cart-config
+              mountPath: /app/etc/cart.yaml
+              subPath: cart.yaml
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+      volumes:
+        - name: cart-config
+          configMap:
+            name: cart-config

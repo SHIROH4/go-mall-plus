@@ -1,0 +1,213 @@
+# =============================================================================
+# Order RPC Service with Auxiliary Workers Deployment (K8s native - no Etcd)
+# =============================================================================
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: order-config
+  namespace: ecommerce
+data:
+  order.yaml: |
+    Name: order.rpc
+    ListenOn: 0.0.0.0:8082
+    # K8s native service discovery - no Etcd needed
+    DataSource: root:root123456@tcp(mysql:3306)/ecommerce_demo?charset=utf8mb4&parseTime=True&loc=Local
+    RedisConf:
+      Host: redis:6379
+      Type: node
+      Pass: "redis123456"
+      DB: 0
+    # Direct gRPC connection via K8s DNS
+    ProductRpcConf:
+      Endpoints:
+        - product.ecommerce.svc.cluster.local:8081
+    RabbitMQ:
+      Url: "amqp://guest:guest@rabbitmq:5672/"
+      QueueName: "order_create_queue"
+    OrderTimeout:
+      orderExpireMinutes: 30
+      delayQueueName: order.delay.queue
+      delayExchangeName: order.delay.exchange
+      scanIntervalSeconds: 60
+      maxScanCount: 100
+    MQConsumer:
+      prefetchCount: 10
+      maxRetryTimes: 3
+      retryDelay: 5
+      enableDLQ: true
+      dlqExchangeName: order.dlx
+      dlqQueueName: order.dlq
+      consumerTag: order-consumer
+      shutdownTimeout: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: order
+  namespace: ecommerce
+spec:
+  type: ClusterIP
+  selector:
+    app: order
+  ports:
+    - name: grpc
+      port: 8082
+      targetPort: 8082
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order
+  namespace: ecommerce
+  labels:
+    app: order
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: order
+  template:
+    metadata:
+      labels:
+        app: order
+    spec:
+      containers:
+        - name: order
+          image: ecommerce-order:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8082
+              name: grpc
+          volumeMounts:
+            - name: order-config
+              mountPath: /app/etc/order.yaml
+              subPath: order.yaml
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: order-config
+          configMap:
+            name: order-config
+---
+# Order Delay Consumer
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-delay
+  namespace: ecommerce
+  labels:
+    app: order-delay
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: order-delay
+  template:
+    metadata:
+      labels:
+        app: order-delay
+    spec:
+      containers:
+        - name: order-delay
+          image: ecommerce-order-delay:latest
+          imagePullPolicy: Never
+          volumeMounts:
+            - name: order-config
+              mountPath: /app/etc/order.yaml
+              subPath: order.yaml
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+      volumes:
+        - name: order-config
+          configMap:
+            name: order-config
+---
+# Order Cron Job
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-cron
+  namespace: ecommerce
+  labels:
+    app: order-cron
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: order-cron
+  template:
+    metadata:
+      labels:
+        app: order-cron
+    spec:
+      containers:
+        - name: order-cron
+          image: ecommerce-order-cron:latest
+          imagePullPolicy: Never
+          volumeMounts:
+            - name: order-config
+              mountPath: /app/etc/order.yaml
+              subPath: order.yaml
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+      volumes:
+        - name: order-config
+          configMap:
+            name: order-config
+---
+# Order DLQ Consumer
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-dlq
+  namespace: ecommerce
+  labels:
+    app: order-dlq
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: order-dlq
+  template:
+    metadata:
+      labels:
+        app: order-dlq
+    spec:
+      containers:
+        - name: order-dlq
+          image: ecommerce-order-dlq:latest
+          imagePullPolicy: Never
+          volumeMounts:
+            - name: order-config
+              mountPath: /app/etc/order.yaml
+              subPath: order.yaml
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+      volumes:
+        - name: order-config
+          configMap:
+            name: order-config

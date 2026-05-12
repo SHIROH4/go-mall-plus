@@ -1,0 +1,101 @@
+syntax = "proto3";
+
+package pb;
+
+option go_package = "./pb";
+
+// 支付记录
+message PaymentInfo {
+  int64 id = 1;
+  string payment_no = 2;
+  string order_no = 3;
+  int64 user_id = 4;
+  int64 amount = 5;
+  int32 status = 6;
+  string status_text = 7;
+  string pay_channel = 8;
+  int64 pay_time = 9;
+  int64 expire_time = 10;
+  int64 created_at = 11;
+  int64 updated_at = 12;
+}
+
+// 发起支付
+message CreatePayReq {
+  string order_no = 1;
+  int64 user_id = 2;
+  int64 amount = 3;
+  string pay_channel = 4; // alipay / wechat
+}
+
+message CreatePayResp {
+  string payment_no = 1;
+  string qr_code = 2;     // 支付二维码链接
+  int64 expire_time = 3;  // 过期时间戳
+}
+
+// 查询支付状态
+message GetPayStatusReq {
+  string payment_no = 1;
+  int64 user_id = 2;
+}
+
+message GetPayStatusResp {
+  string payment_no = 1;
+  int32 status = 2;       // 0待支付 1已支付 2已取消 3已超时
+  string status_text = 3;
+  int64 amount = 4;
+  string order_no = 5;
+}
+
+// 取消支付
+message CancelPayReq {
+  string payment_no = 1;
+  int64 user_id = 2;
+}
+
+message CancelPayResp {
+  string message = 1;
+}
+
+// 支付回调 (内部服务调用)
+message PayCallbackReq {
+  string payment_no = 1;
+  string pay_channel = 2;
+  string callback_data = 3;
+}
+
+message PayCallbackResp {
+  bool success = 1;
+  string message = 2;
+}
+
+// 支付记录列表
+message ListPayReq {
+  int64 user_id = 1;
+  int32 page = 2;
+  int32 page_size = 3;
+}
+
+message ListPayResp {
+  repeated PaymentInfo payments = 1;
+  int32 total = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+}
+
+// 关闭超时支付 (内部定时任务调用)
+message CloseExpiredPayReq {}
+
+message CloseExpiredPayResp {
+  int32 closed_count = 1;
+}
+
+service Payment {
+  rpc CreatePay(CreatePayReq) returns (CreatePayResp);
+  rpc GetPayStatus(GetPayStatusReq) returns (GetPayStatusResp);
+  rpc CancelPay(CancelPayReq) returns (CancelPayResp);
+  rpc PayCallback(PayCallbackReq) returns (PayCallbackResp);
+  rpc ListPay(ListPayReq) returns (ListPayResp);
+  rpc CloseExpiredPay(CloseExpiredPayReq) returns (CloseExpiredPayResp);
+}

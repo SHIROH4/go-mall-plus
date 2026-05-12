@@ -1,0 +1,253 @@
+# =============================================================================
+# Go-Mall-Plus 统一编排配置
+# 一键启动后端 + 前端 + 基础设施
+# =============================================================================
+
+services:
+  # ==================== 基础设施 ====================
+
+  mysql:
+    image: mysql:8.0
+    container_name: gomall-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root123456
+      MYSQL_DATABASE: ecommerce_demo
+      TZ: Asia/Shanghai
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./ecommerce-demo/deploy/sql/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - gomall-network
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot123456"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: gomall-redis
+    restart: unless-stopped
+    command: redis-server --requirepass redis123456
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - gomall-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "redis123456", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3.12-management
+    container_name: gomall-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - gomall-network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==================== 后端微服务 ====================
+
+  gateway:
+    build:
+      context: ./ecommerce-demo
+      dockerfile: ./deploy/docker/gateway.dockerfile
+    container_name: gomall-gateway
+    restart: unless-stopped
+    ports:
+      - "8888:8888"
+    volumes:
+      - ./ecommerce-demo/deploy/cert:/app/cert:ro
+      - ./ecommerce-demo/app/gateway/etc:/app/etc:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - gomall-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  user:
+    build:
+      context: ./ecommerce-demo
+      dockerfile: ./deploy/docker/user.dockerfile
+    container_name: gomall-user
+    restart: unless-stopped
+    volumes:
+      - ./ecommerce-demo/app/user/etc:/app/etc:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - gomall-network
+
+  product:
+    build:
+      context: ./ecommerce-demo
+      dockerfile: ./deploy/docker/product.dockerfile
+    container_name: gomall-product
+    restart: unless-stopped
+    volumes:
+      - ./ecommerce-demo/app/product/etc:/app/etc:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - gomall-network
+
+  order:
+    build:
+      context: ./ecommerce-demo
+      dockerfile: ./deploy/docker/order.dockerfile
+    container_name: gomall-order
+    restart: unless-stopped
+    volumes:
+      - ./ecommerce-demo/app/order/etc:/app/etc:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - gomall-network
+
+  order-delay:
+    build:
+      context: ./ecommerce-demo
+      dockerfile: ./deploy/docker/order-delay.dockerfile
+    container_name: gomall-order-delay
+    restart: unless-stopped
+    volumes:
+      - ./ecommerce-demo/app/order/etc:/app/etc:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - gomall-network
+
+  order-cron:
+    build:
+      context: ./ecommerce-demo
+      dockerfile: ./deploy/docker/order-cron.dockerfile
+    container_name: gomall-order-cron
+    restart: unless-stopped
+    volumes:
+      - ./ecommerce-demo/app/order/etc:/app/etc:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - gomall-network
+
+  order-dlq:
+    build:
+      context: ./ecommerce-demo
+      dockerfile: ./deploy/docker/order-dlq.dockerfile
+    container_name: gomall-order-dlq
+    restart: unless-stopped
+    volumes:
+      - ./ecommerce-demo/app/order/etc:/app/etc:ro
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - gomall-network
+
+  cart:
+    build:
+      context: ./ecommerce-demo
+      dockerfile: ./deploy/docker/cart.dockerfile
+    container_name: gomall-cart
+    restart: unless-stopped
+    volumes:
+      - ./ecommerce-demo/app/cart/etc:/app/etc:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - gomall-network
+
+  payment:
+    build:
+      context: ./ecommerce-demo
+      dockerfile: ./deploy/docker/payment.dockerfile
+    container_name: gomall-payment
+    restart: unless-stopped
+    volumes:
+      - ./ecommerce-demo/app/payment/etc:/app/etc:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - gomall-network
+
+  address:
+    build:
+      context: ./ecommerce-demo
+      dockerfile: ./deploy/docker/address.dockerfile
+    container_name: gomall-address
+    restart: unless-stopped
+    volumes:
+      - ./ecommerce-demo/app/address/etc:/app/etc:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+    networks:
+      - gomall-network
+
+  # ==================== 前端 ====================
+
+  frontend:
+    build:
+      context: ./ecommerce-frontend
+      dockerfile: ./deploy/Dockerfile
+    container_name: gomall-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      gateway:
+        condition: service_started
+    networks:
+      - gomall-network
+
+# ==================== 网络和卷 ====================
+
+networks:
+  gomall-network:
+    driver: bridge
+
+volumes:
+  mysql_data:
+  redis_data:
+  rabbitmq_data:

@@ -1,0 +1,2 @@
+KafkaBrokers:
+  - kafka:9092

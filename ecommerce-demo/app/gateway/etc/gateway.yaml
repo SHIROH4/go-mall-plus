@@ -1,0 +1,65 @@
+Name: gateway
+Host: 0.0.0.0
+Port: 8888
+
+Auth:
+  PrivateKeyPath: "/app/cert/private.pem"
+  PublicKeyPath: "/app/cert/public.pem"
+  AccessExpire: 7200
+  RefreshExpire: 604800
+
+# 网关的 Redis 配置 (用于存放黑名单)
+RedisConf:
+  Host: redis:6379
+  Type: node
+  Pass: ""
+  DB: 0
+
+# MySQL 配置
+MysqlConf:
+  Host: mysql:3306
+  User: root
+  Password: root
+  Database: ecommerce_demo
+
+# User RPC客户端配置
+UserRpcConf:
+  Etcd:
+    Hosts:
+      - etcd:2379
+    Key: user.rpc
+
+# Product RPC 客户端配置
+ProductRpcConf:
+  Etcd:
+    Hosts:
+      - etcd:2379
+    Key: product.rpc
+
+# Order RPC 客户端配置
+OrderRpcConf:
+  Etcd:
+    Hosts:
+      - etcd:2379
+    Key: order.rpc
+
+# Cart RPC 客户端配置
+CartRpcConf:
+  Etcd:
+    Hosts:
+      - etcd:2379
+    Key: cart.rpc
+
+# Payment RPC 客户端配置
+PaymentRpcConf:
+  Etcd:
+    Hosts:
+      - etcd:2379
+    Key: payment.rpc
+
+# Address RPC 客户端配置
+AddressRpcConf:
+  Etcd:
+    Hosts:
+      - etcd:2379
+    Key: address.rpc

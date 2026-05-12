@@ -1,0 +1,16 @@
+# =============================================================================
+# 通用二进制镜像 - 使用本地交叉编译的二进制
+# =============================================================================
+
+FROM alpine:3.19
+
+RUN apk add --no-cache ca-certificates tzdata
+
+WORKDIR /app
+
+ARG BINARY
+COPY _output/${BINARY} ./binary
+
+EXPOSE 8888
+
+ENTRYPOINT ["./binary"]

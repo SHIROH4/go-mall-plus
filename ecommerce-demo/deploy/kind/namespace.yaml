@@ -1,0 +1,9 @@
+# =============================================================================
+# Namespace: ecommerce
+# =============================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ecommerce
+  labels:
+    name: ecommerce

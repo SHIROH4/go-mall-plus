@@ -1,0 +1,80 @@
+# =============================================================================
+# Payment RPC Service Deployment (K8s native - no Etcd)
+# =============================================================================
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: payment-config
+  namespace: ecommerce
+data:
+  payment.yaml: |
+    Name: payment.rpc
+    ListenOn: 0.0.0.0:8084
+    # K8s native service discovery - no Etcd needed
+    MySQLConf:
+      DataSource: "root:root123456@tcp(mysql:3306)/ecommerce_demo?charset=utf8mb4&parseTime=True&loc=Local"
+    RedisConf:
+      Host: redis:6379
+      Type: node
+      Pass: "redis123456"
+      DB: 0
+    # Direct gRPC connection via K8s DNS
+    OrderRpcConf:
+      Endpoints:
+        - order.ecommerce.svc.cluster.local:8082
+    PayExpireMinutes: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment
+  namespace: ecommerce
+spec:
+  type: ClusterIP
+  selector:
+    app: payment
+  ports:
+    - name: grpc
+      port: 8084
+      targetPort: 8084
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment
+  namespace: ecommerce
+  labels:
+    app: payment
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: payment
+  template:
+    metadata:
+      labels:
+        app: payment
+    spec:
+      containers:
+        - name: payment
+          image: ecommerce-payment:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8084
+              name: grpc
+          volumeMounts:
+            - name: payment-config
+              mountPath: /app/etc/payment.yaml
+              subPath: payment.yaml
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      volumes:
+        - name: payment-config
+          configMap:
+            name: payment-config

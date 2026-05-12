@@ -1,0 +1,57 @@
+Name: gateway
+Host: 0.0.0.0
+Port: 8888
+
+Auth:
+  PrivateKeyPath: "/app/cert/private.pem"
+  PublicKeyPath: "/app/cert/public.pem"
+  AccessExpire: 7200
+  RefreshExpire: 604800
+
+RedisConf:
+  Host: redis
+  Type: node
+  Pass: redis123456
+  DB: 0
+
+MysqlConf:
+  Host: mysql
+  User: root
+  Password: root123
+  Database: ecommerce_demo
+
+UserRpcConf:
+  Etcd:
+    Hosts:
+      - etcd:2379
+    Key: user.rpc
+
+ProductRpcConf:
+  Etcd:
+    Hosts:
+      - etcd:2379
+    Key: product.rpc
+
+OrderRpcConf:
+  Etcd:
+    Hosts:
+      - etcd:2379
+    Key: order.rpc
+
+CartRpcConf:
+  Etcd:
+    Hosts:
+      - etcd:2379
+    Key: cart.rpc
+
+PaymentRpcConf:
+  Etcd:
+    Hosts:
+      - etcd:2379
+    Key: payment.rpc
+
+AddressRpcConf:
+  Etcd:
+    Hosts:
+      - etcd:2379
+    Key: address.rpc

@@ -1,0 +1,16 @@
+Name: product.rpc
+ListenOn: 0.0.0.0:8081
+Etcd:
+  Hosts:
+    - etcd:2379
+  Key: product.rpc
+
+# MySQL 配置
+DataSource: root:root123456@tcp(mysql:3306)/ecommerce_demo?charset=utf8mb4&parseTime=True&loc=Local
+
+# Redis 配置 (高并发缓存)
+RedisConf:
+  Host: redis:6379
+  Type: node
+  Pass: "redis123456"
+  DB: 0

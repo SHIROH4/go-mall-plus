@@ -1,0 +1,58 @@
+---
+# ServiceMonitor 用于让 Prometheus 自动发现 Gateway 服务
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: gateway-monitor
+  namespace: monitoring
+  labels:
+    release: prometheus  # 必须与 Prometheus 的 serviceMonitorSelector 匹配
+spec:
+  selector:
+    matchLabels:
+      app: gateway
+  namespaceSelector:
+    matchNames:
+      - ecommerce
+  endpoints:
+    - port: gateway
+      path: /metrics
+      interval: 15s
+---
+# ServiceMonitor 用于 Cart 服务
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: cart-monitor
+  namespace: monitoring
+  labels:
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: cart
+  namespaceSelector:
+    matchNames:
+      - ecommerce
+  endpoints:
+    - port: cart
+      interval: 15s
+---
+# ServiceMonitor 用于 Order 服务
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: order-monitor
+  namespace: monitoring
+  labels:
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: order
+  namespaceSelector:
+    matchNames:
+      - ecommerce
+  endpoints:
+    - port: order
+      interval: 15s

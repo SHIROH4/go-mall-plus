@@ -1,0 +1,110 @@
+syntax = "v1"
+
+// 1. 定义结构体 (只接收前端需要的参数)
+type (
+	RegisterReq {
+		// 用户名必填，且长度在 4 到 20 之间
+		Username string `json:"username" validate:"required,min=4,max=20"`
+		// 密码必填，且长度最少 6 位
+		Password string `json:"password" validate:"required,min=6"`
+	}
+	RegisterResp {
+		Id int64 `json:"id"`
+	}
+	LoginReq {
+		Username string `json:"username" validate:"required"`
+		Password string `json:"password" validate:"required"`
+	}
+	LoginResp {
+		Id           int64  `json:"id"`
+		AccessToken  string `json:"accessToken"` // 短期令牌 (如: 2小时)
+		RefreshToken string `json:"refreshToken"` // 长期令牌 (如: 7天)
+	}
+	// 新增 RefreshToken 请求和响应
+	RefreshTokenReq {
+		RefreshToken string `json:"refreshToken" validate:"required"`
+	}
+	RefreshTokenResp {
+		AccessToken  string `json:"accessToken"`
+		RefreshToken string `json:"refreshToken"`
+	}
+	// 新增 Logout 响应
+	LogoutResp  {}
+	GetUserInfoResp {
+		Id       int64  `json:"id"`
+		Username string `json:"username"`
+	}
+	ProductItem {
+		Id    int64  `json:"id"`
+		Name  string `json:"name"`
+		Desc  string `json:"desc"`
+		Price int64  `json:"price"` // 返回给前端也是分
+	}
+	ListProductResp {
+		Products []ProductItem `json:"products"`
+	}
+	GetProductReq {
+		Id int64 `path:"id"` // 注意这里用 path 标签，支持 /api/product/1 这种 RESTful 风格
+	}
+	GetProductResp {
+		Product ProductItem `json:"product"`
+	}
+	CreateOrderReq {
+		ProductId int64 `json:"productId" validate:"required,min=1"`
+		Count     int32 `json:"count" validate:"required,min=1"`
+	}
+	CreateOrderResp {
+		OrderNo string `json:"orderNo"`
+	}
+)
+
+// 2. 开放路由 (不需要 Token 即可访问)
+@server (
+	group: user
+)
+service gateway {
+	@handler Register
+	post /api/user/register (RegisterReq) returns (RegisterResp)
+
+	@handler Login
+	post /api/user/login (LoginReq) returns (LoginResp)
+
+	@handler Refresh
+	post /api/user/refresh (RefreshTokenReq) returns (RefreshTokenResp)
+}
+
+// 3. 鉴权路由 (必须携带合法 JWT Token 才能访问)
+@server (
+	middleware: AuthMiddleware
+	group:      user
+)
+service gateway {
+	@handler GetUserInfo
+	get /api/user/info returns (GetUserInfoResp)
+
+	@handler Logout
+	post /api/user/logout returns (LogoutResp)
+}
+
+// 订单相关鉴权路由 (必须登录才能下单)
+@server (
+	middleware: AuthMiddleware
+	group:      order // 生成到 order 目录下
+)
+service gateway {
+	@handler CreateOrder
+	post /api/order/create (CreateOrderReq) returns (CreateOrderResp)
+}
+
+// 商品相关开放路由
+@server (
+	group: product // goctl 会帮我们生成到 product 目录下
+)
+service gateway {
+	@handler ListProduct
+	get /api/product/list returns (ListProductResp)
+
+	@handler GetProduct
+	get /api/product/:id (GetProductReq) returns (GetProductResp) // RESTful 路径参数
+}
+

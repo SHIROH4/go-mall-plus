@@ -1,0 +1,7 @@
+Name: address.rpc
+ListenOn: 0.0.0.0:8085
+Etcd:
+  Hosts:
+  - etcd:2379
+  Key: address.rpc
+DataSource: root:root@tcp(mysql:3306)/ecommerce_demo?charset=utf8mb4&parseTime=True&loc=Local

@@ -1,0 +1,14 @@
+Name: order.rpc
+ListenOn: 0.0.0.0:8080
+Etcd:
+  Hosts:
+    - etcd:2379
+  Key: order.rpc
+DataSource: root:root123456@tcp(mysql:3306)/ecommerce_demo?charset=utf8mb4&parseTime=True&loc=Local
+RedisHost: redis:6379
+RedisPass: redis123456
+KafkaConf:
+  Brokers:
+    - kafka:9092
+  Topic: order_delay
+  Group: order-consumer

@@ -1,0 +1,58 @@
+Name: order.rpc
+ListenOn: 0.0.0.0:8082
+Etcd:
+  Hosts:
+    - etcd:2379
+  Key: order.rpc
+
+DataSource: root:root123456@tcp(mysql:3306)/ecommerce_demo?charset=utf8mb4&parseTime=True&loc=Local
+
+RedisConf:
+  Host: redis:6379
+  Type: node
+  Pass: "redis123456"
+  DB: 0
+
+# 注入商品中心的 RPC 配置 (我们需要调商品中心查价格)
+ProductRpcConf:
+  Etcd:
+    Hosts:
+      - etcd:2379
+    Key: product.rpc
+
+# RabbitMQ 配置
+RabbitMQ:
+  Url: "amqp://guest:guest@rabbitmq:5672/"
+  QueueName: "order_create_queue"
+
+# [新增] 订单超时配置
+OrderTimeout:
+  # 订单超时时间，单位：分钟
+  orderExpireMinutes: 30
+  # 延迟队列名称（死信队列）
+  delayQueueName: order.delay.queue
+  # 延迟交换机名称（用于TTL死信转发）
+  delayExchangeName: order.delay.exchange
+  # 定时扫描间隔，单位：秒
+  scanIntervalSeconds: 60
+  # 每次最大扫描处理数量
+  maxScanCount: 100
+
+# [新增] MQ消费者可靠性配置
+MQConsumer:
+  # 每次预取消息数量
+  prefetchCount: 10
+  # 最大重试次数，超过后进入死信队列
+  maxRetryTimes: 3
+  # 重试间隔（秒）
+  retryDelay: 5
+  # 是否启用死信队列
+  enableDLQ: true
+  # 死信交换机名称
+  dlqExchangeName: order.dlx
+  # 死信队列名称
+  dlqQueueName: order.dlq
+  # 消费者标签
+  consumerTag: order-consumer
+  # 服务关闭时等待处理完成的最大时间（秒）
+  shutdownTimeout: 30

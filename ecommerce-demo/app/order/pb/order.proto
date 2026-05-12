@@ -1,0 +1,105 @@
+syntax = "proto3";
+
+package pb;
+option go_package = "./pb";
+
+// 创建订单(下单/秒杀) 请求
+message CreateOrderReq {
+  int64 user_id = 1;     // 下单用户
+  int64 product_id = 2;  // 商品ID
+  int32 count = 3;       // 购买数量
+}
+
+message CreateOrderResp {
+  string order_no = 1;   // 返回业务订单号
+  int64 expire_time = 2; // 订单过期时间（Unix时间戳）
+}
+
+// 支付确认请求
+message ConfirmPayReq {
+  string order_no = 1;    // 订单号
+  string payment_no = 2;  // 支付单号
+  string pay_channel = 3; // 支付渠道
+}
+
+message ConfirmPayResp {
+  bool success = 1;
+  string message = 2;
+}
+
+// 订单列表请求
+message ListOrderReq {
+  int64 user_id = 1;      // 用户ID
+  int32 page = 2;         // 页码
+  int32 page_size = 3;    // 每页数量
+  int32 status = 4;       // 订单状态筛选 (0=待支付, 1=已支付, 2=已取消, 3=已超时)
+}
+
+message ListOrderResp {
+  repeated OrderItem orders = 1;
+  int32 total = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+}
+
+message OrderItem {
+  int64 id = 1;
+  string order_no = 2;
+  int64 user_id = 3;
+  int64 product_id = 4;
+  string product_name = 5;
+  int32 count = 6;
+  int64 total_amount = 7;
+  int32 status = 8;
+  string status_text = 9;
+  int64 create_time = 10;
+  int64 pay_time = 11;
+  int64 expire_time = 12; // 订单过期时间
+}
+
+// 订单详情请求
+message GetOrderDetailReq {
+  int64 user_id = 1;      // 用户ID
+  string order_no = 2;    // 订单号
+}
+
+message GetOrderDetailResp {
+  int64 id = 1;
+  string order_no = 2;
+  int64 user_id = 3;
+  int64 product_id = 4;
+  string product_name = 5;
+  string product_desc = 6;
+  string product_image = 7;
+  int32 count = 8;
+  int64 total_amount = 9;
+  int32 status = 10;
+  string status_text = 11;
+  int64 create_time = 12;
+  int64 pay_time = 13;
+  int64 expire_time = 14;
+}
+
+// 取消订单请求
+message CancelOrderReq {
+  int64 user_id = 1;      // 用户ID
+  string order_no = 2;     // 订单号
+}
+
+message CancelOrderResp {
+  bool success = 1;
+  string message = 2;
+}
+
+service Order {
+  // 核心下单接口 (内部将实现高并发扣库存)
+  rpc CreateOrder(CreateOrderReq) returns(CreateOrderResp);
+  // 支付确认
+  rpc ConfirmPay(ConfirmPayReq) returns(ConfirmPayResp);
+  // 订单列表
+  rpc ListOrder(ListOrderReq) returns(ListOrderResp);
+  // 订单详情
+  rpc GetOrderDetail(GetOrderDetailReq) returns(GetOrderDetailResp);
+  // 取消订单
+  rpc CancelOrder(CancelOrderReq) returns(CancelOrderResp);
+}

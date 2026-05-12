@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+// 声明生成的 go 代码所属的包名
+package pb;
+option go_package = "./pb";
+
+// ------------------------------------
+// 1. 数据结构定义 (Message)
+// ------------------------------------
+
+// 用户注册请求
+message RegisterReq {
+  string username = 1;
+  string password = 2;
+}
+
+// 用户注册响应
+message RegisterResp {
+  int64 id = 1;
+}
+
+// 用户登录请求
+message LoginReq {
+  string username = 1;
+  string password = 2;
+}
+
+// 用户登录响应
+message LoginResp {
+  int64 id = 1;
+  string token = 2; // 后续如果RPC负责签发JWT，可放在这里，但我们规范做法是Gateway签发，这里仅做预留
+}
+
+// 获取用户信息请求
+message GetUserInfoReq {
+  int64 id = 1;
+}
+
+// 获取用户信息响应
+message GetUserInfoResp {
+  int64 id = 1;
+  string username = 2;
+}
+
+// ------------------------------------
+// 2. 服务接口定义 (Service)
+// ------------------------------------
+service User {
+  // 用户注册
+  rpc Register(RegisterReq) returns(RegisterResp);
+  // 用户登录
+  rpc Login(LoginReq) returns(LoginResp);
+  // 获取用户信息
+  rpc GetUserInfo(GetUserInfoReq) returns(GetUserInfoResp);
+}
