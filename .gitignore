@@ -108,3 +108,8 @@ deploy/kind/context/
 .claude/
 ecommerce-demo/.monitor-pids/
 ecommerce-demo/.prometheus-data/
+
+# 编译产物
+ecommerce-demo/deploy/kind/context/
+ecommerce-demo/deploy/kind/output/
+ecommerce-demo/delay
