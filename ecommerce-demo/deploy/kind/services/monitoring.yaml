@@ -1,12 +1,12 @@
 ---
-# ServiceMonitor 用于让 Prometheus 自动发现 Gateway 服务
+# ServiceMonitor - API Gateway
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
   name: gateway-monitor
   namespace: monitoring
   labels:
-    release: prometheus  # 必须与 Prometheus 的 serviceMonitorSelector 匹配
+    release: prometheus
 spec:
   selector:
     matchLabels:
@@ -19,7 +19,83 @@ spec:
       path: /metrics
       interval: 15s
 ---
-# ServiceMonitor 用于 Cart 服务
+# ServiceMonitor - User Service
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: user-monitor
+  namespace: monitoring
+  labels:
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: user
+  namespaceSelector:
+    matchNames:
+      - ecommerce
+  endpoints:
+    - port: user
+      interval: 15s
+---
+# ServiceMonitor - Product Service
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: product-monitor
+  namespace: monitoring
+  labels:
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: product
+  namespaceSelector:
+    matchNames:
+      - ecommerce
+  endpoints:
+    - port: product
+      interval: 15s
+---
+# ServiceMonitor - Order Service
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: order-monitor
+  namespace: monitoring
+  labels:
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: order
+  namespaceSelector:
+    matchNames:
+      - ecommerce
+  endpoints:
+    - port: order
+      interval: 15s
+---
+# ServiceMonitor - Stock Service
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: stock-monitor
+  namespace: monitoring
+  labels:
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: stock
+  namespaceSelector:
+    matchNames:
+      - ecommerce
+  endpoints:
+    - port: stock
+      interval: 15s
+---
+# ServiceMonitor - Cart Service
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
@@ -38,21 +114,40 @@ spec:
     - port: cart
       interval: 15s
 ---
-# ServiceMonitor 用于 Order 服务
+# ServiceMonitor - Payment Service
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
 metadata:
-  name: order-monitor
+  name: payment-monitor
   namespace: monitoring
   labels:
     release: prometheus
 spec:
   selector:
     matchLabels:
-      app: order
+      app: payment
   namespaceSelector:
     matchNames:
       - ecommerce
   endpoints:
-    - port: order
+    - port: payment
+      interval: 15s
+---
+# ServiceMonitor - Address Service
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: address-monitor
+  namespace: monitoring
+  labels:
+    release: prometheus
+spec:
+  selector:
+    matchLabels:
+      app: address
+  namespaceSelector:
+    matchNames:
+      - ecommerce
+  endpoints:
+    - port: address
       interval: 15s

@@ -8,9 +8,51 @@ Auth:
   AccessExpire: 7200
   RefreshExpire: 604800
 
+# 限流配置
+RateLimit:
+  Enabled: true
+  Global:
+    Rate: 1000
+    Burst: 2000
+  PerIP:
+    Rate: 50
+    Burst: 100
+  Routes:
+    "/api/order/create":
+      Rate: 5
+      Burst: 10
+    "/api/user/login":
+      Rate: 3
+      Burst: 5
+    "/api/user/register":
+      Rate: 2
+      Burst: 5
+
+# CORS 配置
+CORS:
+  Enabled: true
+  AllowedOrigins:
+    - "*"
+  AllowedMethods:
+    - GET
+    - POST
+    - PUT
+    - DELETE
+    - OPTIONS
+  AllowedHeaders:
+    - Content-Type
+    - Authorization
+    - X-Requested-With
+  MaxAge: 3600
+
+# 断路器配置
+CircuitBreaker:
+  Enabled: true
+  Threshold: 50
+
 # 网关的 Redis 配置 (用于存放黑名单)
 RedisConf:
-  Host: redis:6379
+  Host: redis-cluster:6379
   Type: node
   Pass: ""
   DB: 0
@@ -28,6 +70,7 @@ UserRpcConf:
     Hosts:
       - etcd:2379
     Key: user.rpc
+  Timeout: 3000
 
 # Product RPC 客户端配置
 ProductRpcConf:
@@ -35,6 +78,7 @@ ProductRpcConf:
     Hosts:
       - etcd:2379
     Key: product.rpc
+  Timeout: 3000
 
 # Order RPC 客户端配置
 OrderRpcConf:
@@ -42,6 +86,15 @@ OrderRpcConf:
     Hosts:
       - etcd:2379
     Key: order.rpc
+  Timeout: 5000
+
+# Stock RPC 客户端配置
+StockRpcConf:
+  Etcd:
+    Hosts:
+      - etcd:2379
+    Key: stock.rpc
+  Timeout: 3000
 
 # Cart RPC 客户端配置
 CartRpcConf:
@@ -49,6 +102,7 @@ CartRpcConf:
     Hosts:
       - etcd:2379
     Key: cart.rpc
+  Timeout: 3000
 
 # Payment RPC 客户端配置
 PaymentRpcConf:
@@ -56,6 +110,7 @@ PaymentRpcConf:
     Hosts:
       - etcd:2379
     Key: payment.rpc
+  Timeout: 5000
 
 # Address RPC 客户端配置
 AddressRpcConf:
@@ -63,3 +118,11 @@ AddressRpcConf:
     Hosts:
       - etcd:2379
     Key: address.rpc
+  Timeout: 3000
+
+# OpenTelemetry 链路追踪配置
+Telemetry:
+  Name: gateway
+  Endpoint: http://jaeger:14268/api/traces
+  Sampler: 1.0
+  Batcher: jaeger

@@ -124,6 +124,24 @@ CREATE TABLE IF NOT EXISTS `address` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='收货地址表';
 
 -- ----------------------------
+-- 8. 本地消息表 (Outbox Pattern)
+-- ----------------------------
+CREATE TABLE IF NOT EXISTS `outbox` (
+    `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
+    `message_type` varchar(64) NOT NULL DEFAULT '' COMMENT '消息类型: order.created / order.delay.check',
+    `payload` text NOT NULL COMMENT '消息体 JSON',
+    `status` tinyint(3) NOT NULL DEFAULT '0' COMMENT '状态: 0待发送 1发送中 2已发送',
+    `retry_count` int(11) NOT NULL DEFAULT '0' COMMENT '已重试次数',
+    `max_retries` int(11) NOT NULL DEFAULT '5' COMMENT '最大重试次数',
+    `next_retry_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '下次重试时间',
+    `error_message` varchar(200) DEFAULT '' COMMENT '最后一次错误信息',
+    `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    KEY `idx_status_next_retry` (`status`, `next_retry_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='本地消息表(Outbox Pattern)';
+
+-- ----------------------------
 -- 初始化测试数据
 -- ----------------------------
 -- 插入分类数据

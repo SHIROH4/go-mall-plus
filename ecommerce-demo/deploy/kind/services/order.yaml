@@ -12,9 +12,9 @@ data:
     Name: order.rpc
     ListenOn: 0.0.0.0:8082
     # K8s native service discovery - no Etcd needed
-    DataSource: root:root123456@tcp(mysql:3306)/ecommerce_demo?charset=utf8mb4&parseTime=True&loc=Local
+    DataSource: root:root123456@tcp(mysql-write:3306)/ecommerce_demo?charset=utf8mb4&parseTime=True&loc=Local
     RedisConf:
-      Host: redis:6379
+      Host: redis-cluster:6379
       Type: node
       Pass: "redis123456"
       DB: 0
@@ -22,9 +22,17 @@ data:
     ProductRpcConf:
       Endpoints:
         - product.ecommerce.svc.cluster.local:8081
+      Timeout: 5000
+    StockRpcConf:
+      Endpoints:
+        - stock.ecommerce.svc.cluster.local:8086
+      Timeout: 5000
     RabbitMQ:
       Url: "amqp://guest:guest@rabbitmq:5672/"
       QueueName: "order_create_queue"
+    Outbox:
+      pollIntervalSeconds: 2
+      batchSize: 50
     OrderTimeout:
       orderExpireMinutes: 30
       delayQueueName: order.delay.queue

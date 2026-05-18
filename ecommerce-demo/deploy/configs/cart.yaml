@@ -4,5 +4,12 @@ Etcd:
   Hosts:
     - etcd:2379
   Key: cart.rpc
-RedisHost: redis:6379
+RedisHost: redis-cluster:6379
 RedisPass: redis123456
+
+# OpenTelemetry 链路追踪配置
+Telemetry:
+  Name: cart.rpc
+  Endpoint: http://jaeger:14268/api/traces
+  Sampler: 1.0
+  Batcher: jaeger

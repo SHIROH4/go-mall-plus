@@ -37,10 +37,14 @@ func (l *GetProductLogic) GetProduct(req *types.GetProductReq) (resp *types.GetP
 
 	return &types.GetProductResp{
 		Product: types.ProductItem{
-			Id:    rpcResp.Product.Id,
-			Name:  rpcResp.Product.Name,
-			Desc:  rpcResp.Product.Desc,
-			Price: rpcResp.Product.Price,
+			Id:           rpcResp.Product.Id,
+			Name:         rpcResp.Product.Name,
+			Desc:         rpcResp.Product.Desc,
+			Price:        rpcResp.Product.Price,
+			ImageUrl:     rpcResp.Product.ImageUrl,
+			CategoryId:   rpcResp.Product.CategoryId,
+			CategoryName: rpcResp.Product.CategoryName,
+			Stock:        rpcResp.Product.Stock,
 		},
 	}, nil
 }

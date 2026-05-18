@@ -38,10 +38,14 @@ func (l *ListProductLogic) ListProduct() (resp *types.ListProductResp, err error
 	var list []types.ProductItem
 	for _, p := range rpcResp.Products {
 		list = append(list, types.ProductItem{
-			Id:    p.Id,
-			Name:  p.Name,
-			Desc:  p.Desc,
-			Price: p.Price,
+			Id:           p.Id,
+			Name:         p.Name,
+			Desc:         p.Desc,
+			Price:        p.Price,
+			ImageUrl:     p.ImageUrl,
+			CategoryId:   p.CategoryId,
+			CategoryName: p.CategoryName,
+			Stock:        p.Stock,
 		})
 	}
 

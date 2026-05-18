@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"ecommerce-demo/app/order/internal/config"
+	"ecommerce-demo/app/order/internal/outbox"
 	"ecommerce-demo/app/order/internal/repo"
 	"ecommerce-demo/app/order/internal/server"
 	"ecommerce-demo/app/order/internal/svc"
@@ -33,14 +34,19 @@ func main() {
 
 	ctx := svc.NewServiceContext(c)
 
-	// 启动 MQ 消费者（异步落库）
+	// 启动 Outbox Worker（替代旧的直接 MQ 投递，保证消息不丢）
+	outboxWorker := outbox.NewWorker(ctx.OutboxRepo, ctx.Producer, c)
+	outboxWorker.Start()
+	defer outboxWorker.Stop()
+
+	// 启动 MQ 消费者（异步落库消息的消费端）
 	mqConsumer := ctx.StartMQConsumer()
 	if mqConsumer != nil {
 		mqConsumer.Start()
 		defer mqConsumer.Stop()
 	}
 
-	// 启动超时订单处理 Worker (独立 goroutine)
+	// 启动超时订单处理 Worker（定时扫描兜底）
 	go startTimeoutWorker(c)
 
 	s := zrpc.MustNewServer(c.RpcServerConf, func(grpcServer *grpc.Server) {
@@ -52,11 +58,11 @@ func main() {
 	})
 	defer s.Stop()
 
-	fmt.Printf("Starting rpc server at %s...\n", c.ListenOn)
+	fmt.Printf("Starting Order RPC server (with Outbox Pattern) at %s...\n", c.ListenOn)
 	s.Start()
 }
 
-// startTimeoutWorker 启动超时订单处理 Worker
+// startTimeoutWorker 启动超时订单处理 Worker（兜底机制，处理 Outbox 延迟消息未覆盖的场景）
 func startTimeoutWorker(c config.Config) {
 	db, err := gorm.Open(mysql.Open(c.DataSource), &gorm.Config{})
 	if err != nil {
@@ -64,8 +70,8 @@ func startTimeoutWorker(c config.Config) {
 		return
 	}
 
-	rdb := redis.NewClient(&redis.Options{
-		Addr:     c.RedisConf.Host,
+	rdb := redis.NewClusterClient(&redis.ClusterOptions{
+		Addrs:    []string{c.RedisConf.Host},
 		Password: c.RedisConf.Pass,
 	})
 
@@ -74,9 +80,13 @@ func startTimeoutWorker(c config.Config) {
 		redis: rdb,
 	}
 
-	log.Println("[OrderTimeoutWorker] 超时订单处理worker已启动，每分钟扫描一次")
+	scanInterval := c.OrderTimeout.ScanIntervalSeconds
+	if scanInterval <= 0 {
+		scanInterval = 60
+	}
+	log.Printf("[OrderTimeoutWorker] 超时订单处理worker已启动，每 %d 秒扫描一次", scanInterval)
 
-	ticker := time.NewTicker(1 * time.Minute)
+	ticker := time.NewTicker(time.Duration(scanInterval) * time.Second)
 	defer ticker.Stop()
 
 	for range ticker.C {
@@ -86,16 +96,18 @@ func startTimeoutWorker(c config.Config) {
 
 type orderTimeoutWorker struct {
 	db    *gorm.DB
-	redis *redis.Client
+	redis *redis.ClusterClient
 }
 
 func (w *orderTimeoutWorker) processTimeoutOrders() {
 	ctx := context.Background()
-	timeout := time.Now().Add(-30 * time.Minute)
 
 	var orders []repo.Order
 	if err := w.db.WithContext(ctx).
-		Where("status = ? AND create_time < ?", repo.OrderStatusPending, timeout).
+		Where("status = ? AND expire_time IS NOT NULL AND expire_time < ?",
+			repo.OrderStatusPending, time.Now()).
+		Order("expire_time ASC").
+		Limit(100).
 		Find(&orders).Error; err != nil {
 		log.Printf("[OrderTimeoutWorker] 查询超时订单失败: %v", err)
 		return
@@ -144,7 +156,7 @@ func (w *orderTimeoutWorker) cancelTimeoutOrder(ctx context.Context, order *repo
 			return result.Error
 		}
 
-		stockKey := fmt.Sprintf("stock:%d", order.ProductID)
+		stockKey := fmt.Sprintf("{stock}:%d", order.ProductID)
 		w.redis.IncrBy(ctx, stockKey, int64(order.Count))
 
 		return nil

@@ -36,16 +36,16 @@ end
 
 type orderRepoImpl struct {
     db  *gorm.DB
-    rdb *redis.Client
+    rdb *redis.ClusterClient
 }
 
-func NewOrderRepo(db *gorm.DB, rdb *redis.Client) repo.OrderRepo {
+func NewOrderRepo(db *gorm.DB, rdb *redis.ClusterClient) repo.OrderRepo {
     return &orderRepoImpl{db: db, rdb: rdb}
 }
 
 // DeductStockCache 执行 Lua 脚本原子扣减库存
 func (r *orderRepoImpl) DeductStockCache(ctx context.Context, productID int64, count int32) (bool, error) {
-    stockKey := fmt.Sprintf("stock:%d", productID)
+    stockKey := fmt.Sprintf("{stock}:%d", productID)
     res, err := deductStockScript.Run(ctx, r.rdb, []string{stockKey}, count).Int()
     if err != nil {
         return false, err
@@ -61,7 +61,7 @@ func (r *orderRepoImpl) DeductStockCache(ctx context.Context, productID int64, c
 
 // RollbackStockCache 补偿机制：如果数据库宕机，要把 Redis 扣掉的库存加回来
 func (r *orderRepoImpl) RollbackStockCache(ctx context.Context, productID int64, count int32) error {
-    stockKey := fmt.Sprintf("stock:%d", productID)
+    stockKey := fmt.Sprintf("{stock}:%d", productID)
     return r.rdb.IncrBy(ctx, stockKey, int64(count)).Err()
 }
 
@@ -94,6 +94,51 @@ func (r *orderRepoImpl) CreateOrderTx(ctx context.Context, order *repo.Order, ex
         order.ExpireTime = &expireTime
         if err := tx.Create(order).Error; err != nil {
             return err
+        }
+
+        return nil
+    })
+}
+
+/*
+  CreateOrderWithOutboxTx 创建订单事务（含 Outbox 本地消息表）
+
+  在单个 MySQL 事务中完成：
+  1. 扣减 MySQL 库存（乐观锁兜底）
+  2. 插入订单记录
+  3. 插入 Outbox 出站消息（用于后续 MQ 投递）
+
+  原子性保证：订单创建和消息写入是原子的，绝不会出现"订单创建了但消息没写"的情况。
+  Outbox Worker 会异步读取并投递消息到 MQ。
+*/
+func (r *orderRepoImpl) CreateOrderWithOutboxTx(ctx context.Context, order *repo.Order, expireTime time.Time, count int32, outboxRecords []*repo.OutboxRecord) error {
+    return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+        // 1. 扣减库存（乐观锁兜底）
+        res := tx.Exec(`
+            UPDATE stock
+            SET stock_num = stock_num - ?,
+                version = version + 1
+            WHERE product_id = ? AND stock_num >= ?`,
+            count, order.ProductID, count)
+
+        if res.Error != nil {
+            return res.Error
+        }
+        if res.RowsAffected == 0 {
+            return errors.New("数据库落库失败: 库存不足或发生并发冲突")
+        }
+
+        // 2. 写入订单
+        order.ExpireTime = &expireTime
+        if err := tx.Create(order).Error; err != nil {
+            return err
+        }
+
+        // 3. 写入 Outbox 出站消息
+        if len(outboxRecords) > 0 {
+            if err := tx.Create(&outboxRecords).Error; err != nil {
+                return err
+            }
         }
 
         return nil
@@ -235,7 +280,7 @@ func (r *orderRepoImpl) TimeoutOrderTx(ctx context.Context, orderNo string, prod
 
         // 4. 回滚库存（Redis 和 MySQL 都回滚）
         // 4.1 回滚 Redis 库存（同步执行，失败则记录日志但不阻塞事务）
-        stockKey := fmt.Sprintf("stock:%d", productID)
+        stockKey := fmt.Sprintf("{stock}:%d", productID)
         if err := r.rdb.IncrBy(ctx, stockKey, int64(count)).Err(); err != nil {
             // Redis 回滚失败不影响主流程，后续有补偿机制
             fmt.Printf("⚠️ Redis 库存回滚失败, OrderNo: %s, ProductID: %d, Err: %v\n",

@@ -1,0 +1,22 @@
+Name: stock.rpc
+ListenOn: 0.0.0.0:8086
+Etcd:
+  Hosts:
+    - etcd:2379
+  Key: stock.rpc
+DataSource: root:root123456@tcp(mysql:3306)/ecommerce_demo?charset=utf8mb4&parseTime=True&loc=Local
+RedisConf:
+  Host: redis:6379
+  Type: node
+  Pass: redis123456
+Reconciliation:
+  Enabled: true
+  IntervalSeconds: 300
+  AlertThresholdPct: 10
+
+# OpenTelemetry 链路追踪配置
+Telemetry:
+  Name: stock.rpc
+  Endpoint: http://jaeger:14268/api/traces
+  Sampler: 1.0
+  Batcher: jaeger

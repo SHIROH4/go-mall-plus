@@ -1,2 +1,9 @@
 KafkaBrokers:
   - kafka:9092
+
+# OpenTelemetry 链路追踪配置
+Telemetry:
+  Name: order-delay.rpc
+  Endpoint: http://jaeger:14268/api/traces
+  Sampler: 1.0
+  Batcher: jaeger

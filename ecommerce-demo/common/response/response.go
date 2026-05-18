@@ -109,3 +109,11 @@ func Fail(w http.ResponseWriter, msg string) {
 		Msg:  msg,
 	})
 }
+
+// FailWithStatus 带自定义HTTP状态码的失败响应（用于限流429等场景）
+func FailWithStatus(w http.ResponseWriter, msg string, statusCode int) {
+	httpx.OkJson(w, Body{
+		Code: statusCode,
+		Msg:  msg,
+	})
+}

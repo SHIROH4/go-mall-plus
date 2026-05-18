@@ -75,8 +75,8 @@ deploy_infrastructure() {
     kubectl apply -f "$KIND_DIR/secrets.yaml"
 
     log_info "Deploying MySQL..."
-    kubectl apply -f "$KIND_DIR/mysql.yaml"
-    kubectl rollout status deployment/mysql -n ecommerce --timeout=300s
+    kubectl apply -f "$KIND_DIR/mysql-statefulset.yaml"
+    kubectl rollout status statefulset/mysql -n ecommerce --timeout=300s
 
     log_info "Deploying Redis..."
     kubectl apply -f "$KIND_DIR/redis.yaml"
@@ -110,7 +110,7 @@ init_database() {
     local max_attempts=30
     local attempt=0
     while [ $attempt -lt $max_attempts ]; do
-        if kubectl exec -n ecommerce deployment/mysql -- mysqladmin ping -uroot -proot123456 &>/dev/null; then
+        if kubectl exec -n ecommerce mysql-0 -- mysqladmin ping -uroot -proot123456 &>/dev/null; then
             log_info "MySQL is ready!"
             break
         fi
@@ -127,15 +127,15 @@ init_database() {
 
     # Create database
     log_info "Creating database and tables..."
-    kubectl exec -n ecommerce deployment/mysql -- mysql -uroot -proot123456 -e "CREATE DATABASE IF NOT EXISTS ecommerce_demo CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" 2>/dev/null || true
+    kubectl exec -n ecommerce mysql-0 -- mysql -uroot -proot123456 -e "CREATE DATABASE IF NOT EXISTS ecommerce_demo CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" 2>/dev/null || true
 
     # Check if tables already exist
-    local tables_exist=$(kubectl exec -n ecommerce deployment/mysql -- mysql -uroot -proot123456 ecommerce_demo -e "SHOW TABLES;" 2>/dev/null | wc -l)
+    local tables_exist=$(kubectl exec -n ecommerce mysql-0 -- mysql -uroot -proot123456 ecommerce_demo -e "SHOW TABLES;" 2>/dev/null | wc -l)
     if [ "$tables_exist" -gt 0 ]; then
         log_info "Tables already exist, skipping init."
     else
         log_info "Importing schema..."
-        kubectl exec -n ecommerce deployment/mysql -- mysql -uroot -proot123456 ecommerce_demo < "$init_sql" 2>/dev/null || \
+        kubectl exec -n ecommerce mysql-0 -- mysql -uroot -proot123456 ecommerce_demo < "$init_sql" 2>/dev/null || \
             log_warn "Failed to import SQL. Please manually initialize the database."
     fi
 
@@ -148,13 +148,13 @@ init_database() {
 deploy_services() {
     log_info "Deploying application services..."
 
-    for svc in gateway user product cart order payment address; do
+    for svc in gateway user product cart order payment address stock; do
         log_info "Deploying $svc..."
         kubectl apply -f "$KIND_DIR/services/${svc}.yaml"
     done
 
     log_info "Waiting for deployments to be ready..."
-    for svc in gateway user product cart order payment address order-delay order-cron order-dlq; do
+    for svc in gateway user product cart order payment address stock order-delay order-cron order-dlq; do
         echo -n "Checking $svc..."
         kubectl rollout status "deployment/$svc" -n ecommerce --timeout=120s 2>/dev/null || log_warn "$svc rollout timeout"
         echo ""

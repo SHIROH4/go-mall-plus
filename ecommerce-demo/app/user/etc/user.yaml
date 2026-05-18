@@ -6,3 +6,10 @@ Etcd:
   Key: user.rpc
 #Mysql配置信息
 DataSource: root:root@tcp(mysql:3306)/ecommerce_demo?charset=utf8mb4&parseTime=True&loc=Local
+
+# OpenTelemetry 链路追踪配置
+Telemetry:
+  Name: user.rpc
+  Endpoint: http://jaeger:14268/api/traces
+  Sampler: 1.0
+  Batcher: jaeger

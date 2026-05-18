@@ -1,0 +1,50 @@
+syntax = "proto3";
+
+package pb;
+option go_package = "./pb";
+
+// 扣减库存请求
+message DeductStockReq {
+  int64 product_id = 1;
+  int32 count = 2;
+}
+
+message DeductStockResp {
+  bool success = 1;
+  string message = 2;
+}
+
+// 回滚库存请求
+message RollbackStockReq {
+  int64 product_id = 1;
+  int32 count = 2;
+}
+
+message RollbackStockResp {
+  bool success = 1;
+}
+
+// 查询库存请求
+message GetStockReq {
+  int64 product_id = 1;
+}
+
+message GetStockResp {
+  int32 stock = 1;
+}
+
+// 批量查询库存请求
+message BatchGetStockReq {
+  repeated int64 product_ids = 1;
+}
+
+message BatchGetStockResp {
+  map<int64, int32> stocks = 1;
+}
+
+service Stock {
+  rpc DeductStock(DeductStockReq) returns(DeductStockResp);
+  rpc RollbackStock(RollbackStockReq) returns(RollbackStockResp);
+  rpc GetStock(GetStockReq) returns(GetStockResp);
+  rpc BatchGetStock(BatchGetStockReq) returns(BatchGetStockResp);
+}

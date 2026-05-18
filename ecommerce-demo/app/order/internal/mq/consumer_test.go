@@ -45,7 +45,7 @@ func TestMessageMetadata(t *testing.T) {
 }
 
 func TestDelayMessageMetadata(t *testing.T) {
-    metadata := DelayMessageMetadata{
+    metadata := MessageMetadata{
         MessageID:  "delay-msg-id",
         TraceID:    "delay-trace-id",
         RetryCount: 1,

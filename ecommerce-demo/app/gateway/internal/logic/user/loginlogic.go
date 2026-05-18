@@ -1,6 +1,3 @@
-// Code scaffolded by goctl. Safe to edit.
-// goctl 1.9.2
-
 package user
 
 import (
@@ -42,17 +39,9 @@ func (l *LoginLogic) Login(req *types.LoginReq) (resp *types.LoginResp, err erro
 	}
 	l.Infof("RPC Login success, userId=%d", rpcResp.Id)
 
-	// 2. 加载 RSA 私钥
-	privateKey, err := utils.LoadRSAPrivateKey(l.svcCtx.Config.Auth.PrivateKeyPath)
-	if err != nil {
-		l.Errorf("Load RSA private key failed: %v, path=%s", err, l.svcCtx.Config.Auth.PrivateKeyPath)
-		return nil, err
-	}
-	l.Infof("RSA private key loaded successfully")
-
-	// 3. 签发 AccessToken (短效)
+	// 2. 签发 AccessToken（使用内存中预加载的私钥，不再读文件）
 	accessToken, _, err := utils.GenerateRsaToken(
-		privateKey,
+		l.svcCtx.PrivateKey,
 		l.svcCtx.Config.Auth.AccessExpire,
 		rpcResp.Id,
 		utils.TokenTypeAccess,
@@ -62,9 +51,9 @@ func (l *LoginLogic) Login(req *types.LoginReq) (resp *types.LoginResp, err erro
 		return nil, err
 	}
 
-	// 4. 签发 RefreshToken (长效)
+	// 3. 签发 RefreshToken
 	refreshToken, _, err := utils.GenerateRsaToken(
-		privateKey,
+		l.svcCtx.PrivateKey,
 		l.svcCtx.Config.Auth.RefreshExpire,
 		rpcResp.Id,
 		utils.TokenTypeRefresh,
@@ -74,7 +63,7 @@ func (l *LoginLogic) Login(req *types.LoginReq) (resp *types.LoginResp, err erro
 		return nil, err
 	}
 
-	l.Infof("Login success: userId=%d, accessTokenLen=%d", rpcResp.Id, len(accessToken))
+	l.Infof("Login success: userId=%d", rpcResp.Id)
 
 	return &types.LoginResp{
 		Id:           rpcResp.Id,

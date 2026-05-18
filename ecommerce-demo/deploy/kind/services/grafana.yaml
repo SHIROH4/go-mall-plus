@@ -1,0 +1,311 @@
+# =============================================================================
+# Grafana - 监控可视化面板
+# =============================================================================
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasources
+  namespace: monitoring
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        uid: prometheus
+        url: http://prometheus.monitoring.svc.cluster.local:9090
+        access: proxy
+        isDefault: true
+        editable: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards
+  namespace: monitoring
+data:
+  dashboards.yaml: |
+    apiVersion: 1
+    providers:
+      - name: 'default'
+        orgId: 1
+        folder: ''
+        type: file
+        disableDeletion: true
+        editable: true
+        options:
+          path: /var/lib/grafana/dashboards
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-go-runtime
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  go-runtime.json: |
+    {
+      "schemaVersion": 39,
+      "title": "Go Runtime Metrics",
+      "uid": "go-runtime",
+      "time": { "from": "now-15m", "to": "now" },
+      "timezone": "browser",
+      "refresh": "10s",
+      "panels": [
+        {
+          "id": 1,
+          "title": "Goroutines",
+          "type": "timeseries",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "go_goroutines",
+              "legendFormat": "{{instance}}"
+            }
+          ],
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+          "fieldConfig": { "defaults": { "custom": { "fillOpacity": 20, "lineWidth": 2 } } }
+        },
+        {
+          "id": 2,
+          "title": "Memory Allocated",
+          "type": "timeseries",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "go_memstats_alloc_bytes",
+              "legendFormat": "{{instance}}"
+            }
+          ],
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+          "fieldConfig": { "defaults": { "unit": "bytes", "custom": { "fillOpacity": 20, "lineWidth": 2 } } }
+        },
+        {
+          "id": 3,
+          "title": "GC Pause Duration",
+          "type": "timeseries",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "rate(go_gc_duration_seconds_sum[1m])",
+              "legendFormat": "{{instance}}"
+            }
+          ],
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+          "fieldConfig": { "defaults": { "unit": "s", "custom": { "fillOpacity": 20, "lineWidth": 2 } } }
+        },
+        {
+          "id": 4,
+          "title": "Heap Objects",
+          "type": "timeseries",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "go_memstats_heap_objects",
+              "legendFormat": "{{instance}}"
+            }
+          ],
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+          "fieldConfig": { "defaults": { "custom": { "fillOpacity": 20, "lineWidth": 2 } } }
+        }
+      ]
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-business
+  namespace: monitoring
+  labels:
+    grafana_dashboard: "1"
+data:
+  business-metrics.json: |
+    {
+      "schemaVersion": 39,
+      "title": "E-commerce Business Metrics",
+      "uid": "ecommerce-business",
+      "time": { "from": "now-15m", "to": "now" },
+      "timezone": "browser",
+      "refresh": "10s",
+      "panels": [
+        {
+          "id": 1,
+          "title": "Order QPS by Status",
+          "type": "timeseries",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "rate(rpc_call_total{service=\"pb.Order\", method=\"CreateOrder\"}[1m])",
+              "legendFormat": "{{status}}"
+            }
+          ],
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 0},
+          "fieldConfig": { "defaults": { "custom": { "fillOpacity": 20, "lineWidth": 2 } } }
+        },
+        {
+          "id": 2,
+          "title": "Order RPC Duration (p50/p95/p99)",
+          "type": "timeseries",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            { "refId": "A", "expr": "histogram_quantile(0.50, rate(rpc_call_duration_seconds_bucket{service=\"pb.Order\", method=\"CreateOrder\"}[1m]))", "legendFormat": "p50" },
+            { "refId": "B", "expr": "histogram_quantile(0.95, rate(rpc_call_duration_seconds_bucket{service=\"order.Order\", method=\"CreateOrder\"}[1m]))", "legendFormat": "p95" },
+            { "refId": "C", "expr": "histogram_quantile(0.99, rate(rpc_call_duration_seconds_bucket{service=\"order.Order\", method=\"CreateOrder\"}[1m]))", "legendFormat": "p99" }
+          ],
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 0},
+          "fieldConfig": { "defaults": { "unit": "s", "custom": { "fillOpacity": 15, "lineWidth": 2 } } }
+        },
+        {
+          "id": 3,
+          "title": "Cart AddCart RPC QPS by Status",
+          "type": "timeseries",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "rate(rpc_call_total{service=\"pb.Cart\", method=\"AddCart\"}[1m])",
+              "legendFormat": "{{status}}"
+            }
+          ],
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+          "fieldConfig": { "defaults": { "custom": { "fillOpacity": 20, "lineWidth": 2 } } }
+        },
+        {
+          "id": 4,
+          "title": "RPC Calls QPS by Service",
+          "type": "timeseries",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(rpc_call_total[1m])) by (service, method)",
+              "legendFormat": "{{service}}/{{method}}"
+            }
+          ],
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+          "fieldConfig": { "defaults": { "custom": { "fillOpacity": 20, "lineWidth": 2 } } }
+        },
+        {
+          "id": 5,
+          "title": "Gateway HTTP QPS by Path",
+          "type": "timeseries",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "rate(gateway_http_requests_total[1m])",
+              "legendFormat": "{{method}} {{path}}"
+            }
+          ],
+          "gridPos": {"h": 8, "w": 12, "x": 0, "y": 16},
+          "fieldConfig": { "defaults": { "custom": { "fillOpacity": 20, "lineWidth": 2 } } }
+        },
+        {
+          "id": 6,
+          "title": "Gateway HTTP Duration (p50/p95/p99)",
+          "type": "timeseries",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "targets": [
+            { "refId": "A", "expr": "histogram_quantile(0.50, rate(gateway_http_request_duration_seconds_bucket[1m]))", "legendFormat": "p50" },
+            { "refId": "B", "expr": "histogram_quantile(0.95, rate(gateway_http_request_duration_seconds_bucket[1m]))", "legendFormat": "p95" },
+            { "refId": "C", "expr": "histogram_quantile(0.99, rate(gateway_http_request_duration_seconds_bucket[1m]))", "legendFormat": "p99" }
+          ],
+          "gridPos": {"h": 8, "w": 12, "x": 12, "y": 16},
+          "fieldConfig": { "defaults": { "unit": "s", "custom": { "fillOpacity": 15, "lineWidth": 2 } } }
+        }
+      ]
+    }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: monitoring
+  labels:
+    app: grafana
+spec:
+  type: NodePort
+  selector:
+    app: grafana
+  ports:
+    - name: web
+      port: 3000
+      targetPort: 3000
+      nodePort: 30300
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: monitoring
+  labels:
+    app: grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: grafana
+  template:
+    metadata:
+      labels:
+        app: grafana
+    spec:
+      containers:
+        - name: grafana
+          image: grafana/grafana:11.0.0
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              value: admin
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              value: admin
+            - name: GF_USERS_ALLOW_SIGN_UP
+              value: "false"
+            - name: GF_AUTH_ANONYMOUS_ENABLED
+              value: "true"
+            - name: GF_INSTALL_PLUGINS
+              value: ""
+          ports:
+            - containerPort: 3000
+              name: web
+          volumeMounts:
+            - name: datasources
+              mountPath: /etc/grafana/provisioning/datasources
+            - name: dashboards-provider
+              mountPath: /etc/grafana/provisioning/dashboards
+            - name: dashboards
+              mountPath: /var/lib/grafana/dashboards
+            - name: dashboards-runtime
+              mountPath: /var/lib/grafana/dashboards
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 300m
+              memory: 384Mi
+      volumes:
+        - name: datasources
+          configMap:
+            name: grafana-datasources
+        - name: dashboards-provider
+          configMap:
+            name: grafana-dashboards
+        - name: dashboards
+          configMap:
+            name: grafana-dashboard-business
+            items:
+              - key: business-metrics.json
+                path: business-metrics.json
+        - name: dashboards-runtime
+          configMap:
+            name: grafana-dashboard-go-runtime
+            items:
+              - key: go-runtime.json
+                path: go-runtime.json

@@ -51,19 +51,21 @@ func (s OrderStatus) StatusText() string {
 
 // OrderRepo 订单仓储接口
 type OrderRepo interface {
-    // [原有方法保持不变]
+    // Redis Lua 原子扣减 (保留兼容，新流程通过 StockRPC)
     DeductStockCache(ctx context.Context, productID int64, count int32) (bool, error)
+    // Redis 库存回滚 (保留兼容)
     RollbackStockCache(ctx context.Context, productID int64, count int32) error
+    // 创建订单 + 扣减 MySQL 库存 (原有)
     CreateOrderTx(ctx context.Context, order *Order, expireTime time.Time, count int32) error
+    // 【新】创建订单 + 扣减 MySQL 库存 + 写入 Outbox 消息（单事务）
+    CreateOrderWithOutboxTx(ctx context.Context, order *Order, expireTime time.Time, count int32, outboxRecords []*OutboxRecord) error
     GetOrderByNo(ctx context.Context, orderNo string) (*Order, error)
     UpdateOrderStatus(ctx context.Context, orderNo string, status int8) error
     ListOrdersByUser(ctx context.Context, userID int64, page, pageSize int32, status int8) ([]*Order, int32, error)
     CancelOrderTx(ctx context.Context, orderNo string, userID int64, productID int64, count int32) error
-
-    // [新增] 超时取消订单事务（状态更新 + 库存回滚 + 记录操作日志）
+    // 超时取消订单事务（状态更新 + 库存回滚）
     TimeoutOrderTx(ctx context.Context, orderNo string, productID int64, count int32) error
-
-    // [新增] 批量查询超时订单（用于定时扫描兜底）
+    // 批量查询超时订单（用于定时扫描兜底）
     ListTimeoutOrders(ctx context.Context, limit int32) ([]*Order, error)
 }
 

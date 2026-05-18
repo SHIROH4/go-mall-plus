@@ -10,7 +10,7 @@ MySQLConf:
   DataSource: "root:root@tcp(mysql:3306)/ecommerce_demo?charset=utf8mb4&parseTime=True&loc=Local"
 
 RedisConf:
-  Host: redis:6379
+  Host: redis-cluster:6379
   Type: node
   Pass: "redis123456"
   DB: 0
@@ -22,3 +22,10 @@ OrderRpcConf:
     Key: order.rpc
 
 PayExpireMinutes: 30
+
+# OpenTelemetry 链路追踪配置
+Telemetry:
+  Name: payment.rpc
+  Endpoint: http://jaeger:14268/api/traces
+  Sampler: 1.0
+  Batcher: jaeger

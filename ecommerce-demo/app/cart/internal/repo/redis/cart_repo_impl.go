@@ -13,10 +13,10 @@ import (
 )
 
 type cartRedisRepo struct {
-	rdb *redis.Client
+	rdb *redis.ClusterClient
 }
 
-func NewCartRedisRepo(rdb *redis.Client) repo.CartRepo {
+func NewCartRedisRepo(rdb *redis.ClusterClient) repo.CartRepo {
 	return &cartRedisRepo{rdb: rdb}
 }
 

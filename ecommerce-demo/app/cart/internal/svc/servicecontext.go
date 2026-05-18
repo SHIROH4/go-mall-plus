@@ -13,7 +13,7 @@ type ServiceContext struct {
 	CartService service.CartService
 }
 
-func NewServiceContext(c config.Config, rdb *goredis.Client) *ServiceContext {
+func NewServiceContext(c config.Config, rdb *goredis.ClusterClient) *ServiceContext {
 	cartRepo := redis.NewCartRedisRepo(rdb)
 	cartService := service.NewCartService(cartRepo)
 

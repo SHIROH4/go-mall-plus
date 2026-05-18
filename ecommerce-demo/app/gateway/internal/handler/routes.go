@@ -18,9 +18,17 @@ import (
 )
 
 func RegisterHandlers(server *rest.Server, serverCtx *svc.ServiceContext) {
+	// 公共中间件链（不带鉴权）：Metrics → CORS → RateLimit
+	publicMw := []rest.Middleware{serverCtx.MetricsMiddleware, serverCtx.CORSMiddleware, serverCtx.RateLimitMiddleware}
+	// 鉴权中间件链：Metrics → CORS → RateLimit → Auth
+	authMw := []rest.Middleware{serverCtx.MetricsMiddleware, serverCtx.CORSMiddleware, serverCtx.RateLimitMiddleware, serverCtx.AuthMiddleware}
+
+	// ============================================
+	// 订单路由（全部需要认证）
+	// ============================================
 	server.AddRoutes(
 		rest.WithMiddlewares(
-			[]rest.Middleware{serverCtx.AuthMiddleware},
+			authMw,
 			[]rest.Route{
 				{
 					Method:  http.MethodPost,
@@ -46,74 +54,89 @@ func RegisterHandlers(server *rest.Server, serverCtx *svc.ServiceContext) {
 		),
 	)
 
-	server.AddRoutes(
-		[]rest.Route{
-			{
-				Method:  http.MethodGet,
-				Path:    "/api/product/:id",
-				Handler: product.GetProductHandler(serverCtx),
-			},
-			{
-				Method:  http.MethodGet,
-				Path:    "/api/product/list",
-				Handler: product.ListProductHandler(serverCtx),
-			},
-			{
-				Method:  http.MethodGet,
-				Path:    "/api/product/list/page",
-				Handler: product.ListProductByPageHandler(serverCtx),
-			},
-			{
-				Method:  http.MethodGet,
-				Path:    "/api/product/categories",
-				Handler: product.GetCategoriesHandler(serverCtx),
-			},
-			{
-				Method:  http.MethodPost,
-				Path:    "/api/product/add",
-				Handler: product.AddProductHandler(serverCtx),
-			},
-			{
-				Method:  http.MethodPut,
-				Path:    "/api/product/update",
-				Handler: product.UpdateProductHandler(serverCtx),
-			},
-			{
-				Method:  http.MethodDelete,
-				Path:    "/api/product/:id",
-				Handler: product.DeleteProductHandler(serverCtx),
-			},
-			{
-				Method:  http.MethodPost,
-				Path:    "/api/product/category/add",
-				Handler: product.AddCategoryHandler(serverCtx),
-			},
-		},
-	)
-
-	server.AddRoutes(
-		[]rest.Route{
-			{
-				Method:  http.MethodPost,
-				Path:    "/api/user/login",
-				Handler: user.LoginHandler(serverCtx),
-			},
-			{
-				Method:  http.MethodPost,
-				Path:    "/api/user/refresh",
-				Handler: user.RefreshHandler(serverCtx),
-			},
-			{
-				Method:  http.MethodPost,
-				Path:    "/api/user/register",
-				Handler: user.RegisterHandler(serverCtx),
-			},
-		},
-	)
-
+	// ============================================
+	// 商品路由（公开访问，CORS + 限流保护）
+	// ============================================
 	server.AddRoutes(
 		rest.WithMiddlewares(
-			[]rest.Middleware{serverCtx.AuthMiddleware},
+			publicMw,
+			[]rest.Route{
+				{
+					Method:  http.MethodGet,
+					Path:    "/api/product/:id",
+					Handler: product.GetProductHandler(serverCtx),
+				},
+				{
+					Method:  http.MethodGet,
+					Path:    "/api/product/list",
+					Handler: product.ListProductHandler(serverCtx),
+				},
+				{
+					Method:  http.MethodGet,
+					Path:    "/api/product/list/page",
+					Handler: product.ListProductByPageHandler(serverCtx),
+				},
+				{
+					Method:  http.MethodGet,
+					Path:    "/api/product/categories",
+					Handler: product.GetCategoriesHandler(serverCtx),
+				},
+				{
+					Method:  http.MethodPost,
+					Path:    "/api/product/add",
+					Handler: product.AddProductHandler(serverCtx),
+				},
+				{
+					Method:  http.MethodPut,
+					Path:    "/api/product/update",
+					Handler: product.UpdateProductHandler(serverCtx),
+				},
+				{
+					Method:  http.MethodDelete,
+					Path:    "/api/product/:id",
+					Handler: product.DeleteProductHandler(serverCtx),
+				},
+				{
+					Method:  http.MethodPost,
+					Path:    "/api/product/category/add",
+					Handler: product.AddCategoryHandler(serverCtx),
+				},
+			}...,
+		),
+	)
+
+	// ============================================
+	// 用户认证路由（公开：登录/注册/刷新，CORS + 限流 + 特殊限流）
+	// ============================================
+	server.AddRoutes(
+		rest.WithMiddlewares(
+			publicMw,
+			[]rest.Route{
+				{
+					Method:  http.MethodPost,
+					Path:    "/api/user/login",
+					Handler: user.LoginHandler(serverCtx),
+				},
+				{
+					Method:  http.MethodPost,
+					Path:    "/api/user/refresh",
+					Handler: user.RefreshHandler(serverCtx),
+				},
+				{
+					Method:  http.MethodPost,
+					Path:    "/api/user/register",
+					Handler: user.RegisterHandler(serverCtx),
+				},
+			}...,
+		),
+	)
+
+	// ============================================
+	// 用户信息路由（需要认证）
+	// ============================================
+	server.AddRoutes(
+		rest.WithMiddlewares(
+			authMw,
 			[]rest.Route{
 				{
 					Method:  http.MethodGet,
@@ -134,7 +157,7 @@ func RegisterHandlers(server *rest.Server, serverCtx *svc.ServiceContext) {
 	// ============================================
 	server.AddRoutes(
 		rest.WithMiddlewares(
-			[]rest.Middleware{serverCtx.AuthMiddleware},
+			authMw,
 			[]rest.Route{
 				{
 					Method:  http.MethodPost,
@@ -176,11 +199,11 @@ func RegisterHandlers(server *rest.Server, serverCtx *svc.ServiceContext) {
 	)
 
 	// ============================================
-	// 支付路由
+	// 支付路由（全部需要认证）
 	// ============================================
 	server.AddRoutes(
 		rest.WithMiddlewares(
-			[]rest.Middleware{serverCtx.AuthMiddleware},
+			authMw,
 			[]rest.Route{
 				{
 					Method:  http.MethodPost,
@@ -207,11 +230,11 @@ func RegisterHandlers(server *rest.Server, serverCtx *svc.ServiceContext) {
 	)
 
 	// ============================================
-	// 收货地址路由
+	// 收货地址路由（全部需要认证）
 	// ============================================
 	server.AddRoutes(
 		rest.WithMiddlewares(
-			[]rest.Middleware{serverCtx.AuthMiddleware},
+			authMw,
 			[]rest.Route{
 				{
 					Method:  http.MethodGet,

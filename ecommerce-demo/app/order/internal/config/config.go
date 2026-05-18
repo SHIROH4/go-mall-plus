@@ -71,6 +71,13 @@ type Config struct {
     }
     // 依赖 Product RPC
     ProductRpcConf zrpc.RpcClientConf
+    // 依赖 Stock RPC（库存服务）
+    StockRpcConf    zrpc.RpcClientConf
+    // Outbox Worker 配置
+    Outbox struct {
+        PollIntervalSeconds int // 轮询间隔，默认 2 秒
+        BatchSize           int // 每次拉取消息数，默认 50
+    }
     RabbitMQ struct {
         Url       string
         QueueName string

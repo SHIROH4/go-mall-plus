@@ -28,10 +28,9 @@ func NewServiceContext(c config.Config) *ServiceContext {
 	}
 
 	// 2. 初始化 Redis 客户端
-	rdb := redis.NewClient(&redis.Options{
-		Addr:     c.RedisConf.Host,
+	rdb := redis.NewClusterClient(&redis.ClusterOptions{
+		Addrs:    []string{c.RedisConf.Host},
 		Password: c.RedisConf.Pass,
-		DB:       0, // 默认使用第0个库
 	})
 
 	// 3. 注入仓储层 (同时传入 db 和 rdb)

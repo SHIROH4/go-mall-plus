@@ -48,8 +48,8 @@ func main() {
     }
 
     // 初始化 Redis
-    rdb := redis.NewClient(&redis.Options{
-        Addr:     c.RedisConf.Host,
+    rdb := redis.NewClusterClient(&redis.ClusterOptions{
+        Addrs:    []string{c.RedisConf.Host},
         Password: c.RedisConf.Pass,
     })
 

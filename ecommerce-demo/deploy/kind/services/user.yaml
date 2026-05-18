@@ -12,7 +12,7 @@ data:
     Name: user.rpc
     ListenOn: 0.0.0.0:8080
     # K8s native service discovery - no Etcd needed
-    DataSource: root:root123456@tcp(mysql:3306)/ecommerce_demo?charset=utf8mb4&parseTime=True&loc=Local
+    DataSource: root:root123456@tcp(mysql-write:3306)/ecommerce_demo?charset=utf8mb4&parseTime=True&loc=Local
 ---
 apiVersion: v1
 kind: Service

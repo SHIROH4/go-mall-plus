@@ -1,0 +1,157 @@
+---
+# PrometheusRule - 电商系统告警规则
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: ecommerce-alerts
+  namespace: monitoring
+  labels:
+    release: prometheus
+spec:
+  groups:
+    # ============================================
+    # P0 严重告警 - 需要立即响应
+    # ============================================
+    - name: ecommerce-critical
+      rules:
+        # 下单失败率超过10%
+        - alert: HighOrderFailureRate
+          expr: |
+            rate(order_create_total{status="fail"}[5m])
+            /
+            (rate(order_create_total{status="success"}[5m]) + rate(order_create_total{status="fail"}[5m]))
+            > 0.1
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "下单失败率超过10%"
+            description: "过去5分钟内下单失败率 {{ $value | humanizePercentage }}，请立即排查Stock服务和Order服务。"
+
+        # MQ死信队列有消息
+        - alert: DLQHasMessages
+          expr: rabbitmq_queue_messages{queue=~"order\\.dlq.*"} > 0
+          for: 30s
+          labels:
+            severity: critical
+          annotations:
+            summary: "死信队列有未处理消息"
+            description: "队列 {{ $labels.queue }} 有 {{ $value }} 条死信消息，需要人工介入处理。"
+
+        # 库存低于5件
+        - alert: CriticallyLowStock
+          expr: stock_remaining < 5
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "商品库存严重不足"
+            description: "商品 {{ $labels.product_id }} 库存仅剩 {{ $value }} 件，建议立即补货。"
+
+        # Outbox积压超过1000条
+        - alert: OutboxBacklogHigh
+          expr: outbox_pending_count > 1000
+          for: 2m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Outbox消息积压严重"
+            description: "Outbox待投递消息数达到 {{ $value }}，请检查MQ连接状态。"
+
+    # ============================================
+    # P1 警告 - 需要关注
+    # ============================================
+    - name: ecommerce-warning
+      rules:
+        # MQ消息积压超过5000条
+        - alert: MQMessageBacklog
+          expr: rabbitmq_queue_messages{queue="order_create_queue"} > 5000
+          for: 3m
+          labels:
+            severity: warning
+          annotations:
+            summary: "订单队列消息积压"
+            description: "订单队列积压 {{ $value }} 条消息，消费可能跟不上生产速度。"
+
+        # MQ消息积压超过10000条
+        - alert: MQMessageBacklogCritical
+          expr: rabbitmq_queue_messages{queue="order_create_queue"} > 10000
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "订单队列消息严重积压"
+            description: "订单队列积压 {{ $value }} 条消息，系统可能即将崩溃。"
+
+        # Redis连接失败
+        - alert: RedisConnectionFailure
+          expr: redis_connected_clients < 1
+          for: 1m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Redis连接异常"
+            description: "Redis客户端连接数为0，请检查Redis服务状态。"
+
+        # 库存低于20件
+        - alert: LowStockWarning
+          expr: stock_remaining < 20 and stock_remaining >= 5
+          for: 5m
+          labels:
+            severity: warning
+          annotations:
+            summary: "商品库存偏低"
+            description: "商品 {{ $labels.product_id }} 库存仅剩 {{ $value }} 件。"
+
+        # MQ发布成功率低于95%
+        - alert: LowMQPublishRate
+          expr: |
+            rate(mq_publish_total{status="fail"}[5m])
+            /
+            (rate(mq_publish_total{status="success"}[5m]) + rate(mq_publish_total{status="fail"}[5m]))
+            > 0.05
+          for: 3m
+          labels:
+            severity: warning
+          annotations:
+            summary: "MQ消息投递成功率低于95%"
+            description: "MQ投递失败率 {{ $value | humanizePercentage }}，请检查RabbitMQ状态。"
+
+        # 支付成功率低于90%
+        - alert: LowPaymentSuccessRate
+          expr: |
+            rate(payment_total{status="fail"}[5m])
+            /
+            (rate(payment_total{status="success"}[5m]) + rate(payment_total{status="fail"}[5m]))
+            > 0.1
+          for: 3m
+          labels:
+            severity: warning
+          annotations:
+            summary: "支付失败率超过10%"
+            description: "支付失败率 {{ $value | humanizePercentage }}，请检查支付服务。"
+
+    # ============================================
+    # P2 通知 - 信息级别
+    # ============================================
+    - name: ecommerce-info
+      rules:
+        # 服务实例异常重启
+        - alert: ServiceRestartFrequent
+          expr: changes(kube_pod_container_status_restarts_total{namespace="ecommerce"}[15m]) > 2
+          for: 1m
+          labels:
+            severity: info
+          annotations:
+            summary: "服务频繁重启"
+            description: "Pod {{ $labels.pod }} 在15分钟内重启了 {{ $value }} 次。"
+
+        # 超时订单数量增多
+        - alert: TimeoutOrdersIncreasing
+          expr: rate(order_timeout_total[10m]) > 5
+          for: 5m
+          labels:
+            severity: info
+          annotations:
+            summary: "超时订单增多"
+            description: "超时订单速率 {{ $value }}/s，可能是支付转化率下降。"

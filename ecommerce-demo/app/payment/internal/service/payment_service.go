@@ -8,10 +8,11 @@ import (
 	"fmt"
 	"time"
 
+	orderclient "ecommerce-demo/app/order/order"
 	"ecommerce-demo/app/payment/internal/model"
 	"ecommerce-demo/app/payment/internal/repo"
 	"ecommerce-demo/app/payment/pb"
-	orderclient "ecommerce-demo/app/order/order"
+	"ecommerce-demo/common/metrics"
 
 	"github.com/zeromicro/go-zero/core/logx"
 )
@@ -22,12 +23,12 @@ const (
 )
 
 var (
-	ErrPaymentNotFound  = errors.New("支付单不存在")
-	ErrPaymentExpired   = errors.New("支付单已过期")
-	ErrPaymentCancelled = errors.New("支付单已取消")
+	ErrPaymentNotFound    = errors.New("支付单不存在")
+	ErrPaymentExpired     = errors.New("支付单已过期")
+	ErrPaymentCancelled   = errors.New("支付单已取消")
 	ErrPaymentAlreadyPaid = errors.New("支付单已支付")
-	ErrOrderAlreadyPaid  = errors.New("订单已支付")
-	ErrInvalidPayChannel = errors.New("无效的支付渠道")
+	ErrOrderAlreadyPaid   = errors.New("订单已支付")
+	ErrInvalidPayChannel  = errors.New("无效的支付渠道")
 )
 
 type PaymentService interface {
@@ -110,6 +111,7 @@ func (s *paymentServiceImpl) CreatePay(ctx context.Context, req *pb.CreatePayReq
 
 	if err := s.repo.Create(ctx, payment); err != nil {
 		return nil, err
+		metrics.PaymentTotal.WithLabelValues("pending", req.PayChannel).Inc()
 	}
 
 	// 5. 生成模拟二维码（实际应调用第三方支付SDK）
@@ -204,6 +206,8 @@ func (s *paymentServiceImpl) PayCallback(ctx context.Context, req *pb.PayCallbac
 	// 3. 检查过期
 	if payment.IsExpired() {
 		s.repo.UpdateStatus(ctx, req.PaymentNo, model.PaymentStatus_Expired, req.CallbackData)
+
+		metrics.PaymentTotal.WithLabelValues("expired", payment.PayChannel).Inc()
 		return &pb.PayCallbackResp{
 			Success: false,
 			Message: "支付单已过期",
@@ -229,6 +233,9 @@ func (s *paymentServiceImpl) PayCallback(ctx context.Context, req *pb.PayCallbac
 			})
 		}
 	}()
+
+	metrics.PaymentTotal.WithLabelValues("success", req.PayChannel).Inc()
+	metrics.PaymentAmountTotal.WithLabelValues(req.PayChannel).Add(float64(payment.Amount))
 
 	return &pb.PayCallbackResp{
 		Success: true,

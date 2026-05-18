@@ -1,463 +1,417 @@
 package mq
 
 import (
-    "context"
-    "encoding/json"
-    "fmt"
-    "log"
-    "time"
+	"context"
+	"encoding/json"
+	"fmt"
+	"log"
+	"sync"
+	"time"
 
-    "ecommerce-demo/app/order/internal/config"
-    "ecommerce-demo/app/order/internal/repo"
+	"ecommerce-demo/app/order/internal/config"
+	"ecommerce-demo/app/order/internal/repo"
+	"ecommerce-demo/common/metrics"
 
-    "github.com/google/uuid"
-    "github.com/redis/go-redis/v9"
-    amqp "github.com/rabbitmq/amqp091-go"
+	"github.com/google/uuid"
+	amqp "github.com/rabbitmq/amqp091-go"
+	"github.com/redis/go-redis/v9"
 )
 
 /*
-  完整手动ACK消费者实现
+  可靠消费者实现（自动重连版）
 
   可靠性保障：
-  1. QoS 预取控制 - 控制消费速率，防止内存溢出
-  2. 手动ACK机制 - 确保消息处理完成后才确认
-  3. 重试次数限制 - 防止无限重试
-  4. 死信队列(DLQ) - 永久失败消息存储
-  5. 优雅退出 - 服务停止时处理完正在处理的消息
-  6. 消息追踪ID - 问题排查
-
-  ACK/NACK 策略：
-  ┌─────────────────────────────────────────────────────────────────┐
-  │ 消息状态                    │ 处理方式                          │
-  ├─────────────────────────────────────────────────────────────────┤
-  │ 解析成功 + 业务处理成功      │ ACK 确认                          │
-  │ 解析失败                    │ ACK 丢弃（无效消息）               │
-  │ 业务处理失败 + 重试次数 < 3  │ Nack + Requeue（重新入队）         │
-  │ 业务处理失败 + 重试次数 >= 3 │ Nack + 发送到DLQ（死信队列）       │
-  │ Redis/数据库故障             │ Nack + Requeue（稍后重试）         │
-  └─────────────────────────────────────────────────────────────────┘
+  1. 手动ACK — 处理完成后确认
+  2. QoS 预取控制 — 控制并发，防止过载
+  3. 死信队列(DLQ) — 永久失败消息存储
+  4. 连接自动重连 — 断线后自动恢复，无需重启服务
+  5. 优雅退出 — 处理完进行中的消息后退出
+  6. 幂等消费 — Redis SetNX 防止重复处理
 */
 
-// MessageMetadata 消息元数据（用于追踪）
 type MessageMetadata struct {
-    MessageID  string    `json:"messageId"`  // 消息唯一ID
-    TraceID    string    `json:"traceId"`    // 链路追踪ID
-    RetryCount int       `json:"retryCount"` // 当前重试次数
-    FirstTry   time.Time `json:"firstTry"`   // 首次尝试时间
+	MessageID  string    `json:"messageId"`
+	TraceID    string    `json:"traceId"`
+	RetryCount int       `json:"retryCount"`
+	FirstTry   time.Time `json:"firstTry"`
 }
 
-// Consumer 消费者接口
 type Consumer interface {
-    Start()
-    Stop()
-    IsRunning() bool
+	Start()
+	Stop()
+	IsRunning() bool
 }
 
-// ReliableConsumer 可靠消息消费者
 type ReliableConsumer struct {
-    conn      *amqp.Connection
-    channel   *amqp.Channel
-    queueName string
-    orderRepo repo.OrderRepo
-    rdb       *redis.Client
-    config    config.MQConsumerConfig
+	url       string
+	cfg       config.MQConsumerConfig
+	queueName string
+	orderRepo repo.OrderRepo
+	rdb       *redis.ClusterClient
 
-    // 运行时状态
-    stopCh    chan struct{}
-    doneCh    chan struct{}
-    isRunning bool
+	mu        sync.RWMutex
+	conn      *amqp.Connection
+	channel   *amqp.Channel
+	closeCh   chan struct{}
+	doneCh    chan struct{}
+	isRunning bool
+	stopping  bool
 }
 
-// NewReliableConsumer 创建可靠消费者
 func NewReliableConsumer(
-    cfg config.Config,
-    orderRepo repo.OrderRepo,
-    rdb *redis.Client,
+	cfg config.Config,
+	orderRepo repo.OrderRepo,
+	rdb *redis.ClusterClient,
 ) (Consumer, error) {
-    // 1. 连接 RabbitMQ
-    conn, err := amqp.Dial(cfg.RabbitMQ.Url)
-    if err != nil {
-        return nil, fmt.Errorf("连接 RabbitMQ 失败: %w", err)
-    }
+	c := &ReliableConsumer{
+		url:       cfg.RabbitMQ.Url,
+		cfg:       cfg.MQConsumer,
+		queueName: cfg.RabbitMQ.QueueName,
+		orderRepo: orderRepo,
+		rdb:       rdb,
+		closeCh:   make(chan struct{}),
+		doneCh:    make(chan struct{}),
+	}
 
-    // 2. 创建 Channel
-    ch, err := conn.Channel()
-    if err != nil {
-        conn.Close()
-        return nil, fmt.Errorf("创建 Channel 失败: %w", err)
-    }
+	if err := c.connect(); err != nil {
+		return nil, fmt.Errorf("连接 RabbitMQ 失败: %w", err)
+	}
 
-    // 3. 设置 QoS（预取控制）
-    // prefetchCount: 每次预取的消息数量
-    // prefetchSize: 预取的消息大小（0表示不限制）
-    // global: false 表示每个消费者独立预取
-    prefetchCount := cfg.MQConsumer.PrefetchCount
-    if prefetchCount <= 0 {
-        prefetchCount = 10
-    }
-    err = ch.Qos(prefetchCount, 0, false)
-    if err != nil {
-        ch.Close()
-        conn.Close()
-        return nil, fmt.Errorf("设置 QoS 失败: %w", err)
-    }
-
-    // 4. 声明主队列
-    _, err = ch.QueueDeclare(
-        cfg.RabbitMQ.QueueName,
-        true,  // durable: 持久化
-        false, // delete when unused
-        false, // exclusive
-        false, // no-wait
-        nil,   // arguments
-    )
-    if err != nil {
-        ch.Close()
-        conn.Close()
-        return nil, fmt.Errorf("声明主队列失败: %w", err)
-    }
-
-    // 5. 如果启用死信队列，声明 DLQ 相关
-    if cfg.MQConsumer.EnableDLQ {
-        if err := declareDLQ(ch, cfg.MQConsumer); err != nil {
-            ch.Close()
-            conn.Close()
-            return nil, fmt.Errorf("声明死信队列失败: %w", err)
-        }
-    }
-
-    return &ReliableConsumer{
-        conn:      conn,
-        channel:   ch,
-        queueName: cfg.RabbitMQ.QueueName,
-        orderRepo: orderRepo,
-        rdb:       rdb,
-        config:    cfg.MQConsumer,
-        stopCh:    make(chan struct{}),
-        doneCh:    make(chan struct{}),
-        isRunning: false,
-    }, nil
+	return c, nil
 }
 
-// declareDLQ 声明死信队列
+// connect 建立连接和通道，声明队列
+func (c *ReliableConsumer) connect() error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.conn != nil {
+		c.conn.Close()
+	}
+
+	conn, err := amqp.Dial(c.url)
+	if err != nil {
+		return err
+	}
+
+	ch, err := conn.Channel()
+	if err != nil {
+		conn.Close()
+		return err
+	}
+
+	// 设置 QoS
+	prefetchCount := c.cfg.PrefetchCount
+	if prefetchCount <= 0 {
+		prefetchCount = 10
+	}
+	if err = ch.Qos(prefetchCount, 0, false); err != nil {
+		ch.Close()
+		conn.Close()
+		return fmt.Errorf("设置 QoS 失败: %w", err)
+	}
+
+	// 声明主队列
+	_, err = ch.QueueDeclare(
+		c.queueName,
+		true, false, false, false, nil,
+	)
+	if err != nil {
+		ch.Close()
+		conn.Close()
+		return fmt.Errorf("声明主队列失败: %w", err)
+	}
+
+	// 声明死信队列相关
+	if c.cfg.EnableDLQ {
+		if err := declareDLQ(ch, c.cfg); err != nil {
+			log.Printf("声明死信队列失败（非致命）: %v", err)
+		}
+	}
+
+	c.conn = conn
+	c.channel = ch
+
+	return nil
+}
+
 func declareDLQ(ch *amqp.Channel, cfg config.MQConsumerConfig) error {
-    // 声明死信交换机
-    err := ch.ExchangeDeclare(
-        cfg.DLQExchangeName,
-        "direct",
-        true,  // durable
-        false, // auto-deleted
-        false, // internal
-        false, // no-wait
-        nil,
-    )
-    if err != nil {
-        return err
-    }
-
-    // 声明死信队列
-    _, err = ch.QueueDeclare(
-        cfg.DLQQueueName,
-        true,  // durable
-        false, // delete when unused
-        false, // exclusive
-        false, // no-wait
-        nil,
-    )
-    if err != nil {
-        return err
-    }
-
-    // 绑定死信队列到死信交换机
-    err = ch.QueueBind(
-        cfg.DLQQueueName,
-        "dlq", // routing key
-        cfg.DLQExchangeName,
-        false,
-        nil,
-    )
-    return err
+	if err := ch.ExchangeDeclare(cfg.DLQExchangeName, "direct", true, false, false, false, nil); err != nil {
+		return err
+	}
+	_, err := ch.QueueDeclare(cfg.DLQQueueName, true, false, false, false, nil)
+	if err != nil {
+		return err
+	}
+	return ch.QueueBind(cfg.DLQQueueName, "dlq", cfg.DLQExchangeName, false, nil)
 }
 
-// Start 启动消费者
 func (c *ReliableConsumer) Start() {
-    if c.isRunning {
-        log.Println("⚠️ 消费者已在运行，忽略重复启动")
-        return
-    }
-    c.isRunning = true
+	c.mu.Lock()
+	if c.isRunning {
+		c.mu.Unlock()
+		return
+	}
+	c.isRunning = true
+	c.mu.Unlock()
 
-    // 启动消费协程
-    go c.consume()
-    log.Printf("🚀 [可靠消费者] 已启动，队列: %s，预取数: %d，最大重试: %d",
-        c.queueName, c.config.PrefetchCount, c.config.MaxRetryTimes)
+	log.Printf("可靠消费者已启动，队列: %s，预取数: %d，最大重试: %d",
+		c.queueName, c.cfg.PrefetchCount, c.cfg.MaxRetryTimes)
+
+	go c.runLoop()
 }
 
-// Stop 停止消费者（优雅退出）
 func (c *ReliableConsumer) Stop() {
-    if !c.isRunning {
-        return
-    }
+	c.mu.Lock()
+	if c.stopping {
+		c.mu.Unlock()
+		return
+	}
+	c.stopping = true
+	c.isRunning = false
+	c.mu.Unlock()
 
-    log.Println("🛑 收到停止信号，正在优雅关闭消费者...")
+	log.Println("正在优雅关闭消费者...")
+	close(c.closeCh)
 
-    // 1. 发送停止信号
-    close(c.stopCh)
+	timeout := c.cfg.ShutdownTimeout
+	if timeout <= 0 {
+		timeout = 30
+	}
+	select {
+	case <-c.doneCh:
+		log.Println("消费者已完全停止")
+	case <-time.After(time.Duration(timeout) * time.Second):
+		log.Printf("优雅关闭超时（%d秒），强制退出", timeout)
+	}
 
-    // 2. 等待正在处理的消息完成
-    select {
-    case <-c.doneCh:
-        log.Println("✅ 所有正在处理的消息已完成")
-    case <-time.After(time.Duration(c.config.ShutdownTimeout) * time.Second):
-        log.Printf("⚠️ 优雅关闭超时（%d秒），强制退出", c.config.ShutdownTimeout)
-    }
-
-    // 3. 关闭连接
-    if c.channel != nil {
-        c.channel.Close()
-    }
-    if c.conn != nil {
-        c.conn.Close()
-    }
-
-    c.isRunning = false
-    log.Println("👋 消费者已完全停止")
+	c.mu.Lock()
+	if c.channel != nil {
+		c.channel.Close()
+	}
+	if c.conn != nil {
+		c.conn.Close()
+	}
+	c.mu.Unlock()
 }
 
-// IsRunning 检查消费者是否在运行
 func (c *ReliableConsumer) IsRunning() bool {
-    return c.isRunning
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.isRunning
 }
 
-// consume 消费消息
-func (c *ReliableConsumer) consume() {
-    defer close(c.doneCh)
+// runLoop 主循环：消费消息 + 断线重连
+func (c *ReliableConsumer) runLoop() {
+	defer close(c.doneCh)
 
-    msgs, err := c.channel.Consume(
-        c.queueName,
-        c.config.ConsumerTag, // consumer tag
-        false,                // auto-ack（必须为false，启用手动ACK）
-        false,                // exclusive
-        false,                // no-local
-        false,                // no-wait
-        nil,                  // args
-    )
-    if err != nil {
-        log.Printf("❌ 注册消费者失败: %v", err)
-        return
-    }
+	for {
+		select {
+		case <-c.closeCh:
+			return
+		default:
+		}
 
-    workerNum := 20
-    log.Printf(" [*] 启动 %d 个 Worker 处理消息", workerNum)
+		c.consumeLoop()
 
-    for i := 0; i < workerNum; i++ {
-        go c.worker(i, msgs)
-    }
+		// 退出前检查
+		select {
+		case <-c.closeCh:
+			return
+		default:
+		}
 
-    // 阻塞直到收到停止信号
-    <-c.stopCh
+		log.Println("消费者连接断开，3秒后重连...")
+		time.Sleep(3 * time.Second)
 
-    // 停止时，不再接受新消息
-    log.Println(" [*] 停止接收新消息，等待处理中...")
+		if err := c.connect(); err != nil {
+			log.Printf("重连失败: %v，继续重试...", err)
+			continue
+		}
+		log.Println("消费者重连成功")
+	}
 }
 
-// worker 消息处理Worker
-func (c *ReliableConsumer) worker(workerID int, msgs <-chan amqp.Delivery) {
-    log.Printf("⚡ [Worker-%d] 已就绪", workerID)
+// consumeLoop 单次消费循环（持续消费直到连接断开）
+func (c *ReliableConsumer) consumeLoop() {
+	c.mu.RLock()
+	ch := c.channel
+	c.mu.RUnlock()
 
-    for {
-        select {
-        case <-c.stopCh:
-            log.Printf("🛑 [Worker-%d] 收到停止信号，退出", workerID)
-            return
-        case d, ok := <-msgs:
-            if !ok {
-                log.Printf("⚠️ [Worker-%d] 消息通道已关闭", workerID)
-                return
-            }
-            c.processMessage(workerID, d)
-        }
-    }
+	if ch == nil || ch.IsClosed() {
+		return
+	}
+
+	// 监听连接关闭通知
+	connClose := c.conn.NotifyClose(make(chan *amqp.Error, 1))
+	chClose := ch.NotifyClose(make(chan *amqp.Error, 1))
+
+	msgs, err := ch.Consume(
+		c.queueName,
+		c.cfg.ConsumerTag,
+		false, // autoAck
+		false, // exclusive
+		false, // noLocal
+		false, // noWait
+		nil,
+	)
+	if err != nil {
+		log.Printf("注册消费者失败: %v", err)
+		return
+	}
+
+	workerNum := 20
+	var wg sync.WaitGroup
+	for i := 0; i < workerNum; i++ {
+		wg.Add(1)
+		go c.worker(i, msgs, &wg)
+	}
+	log.Printf("启动 %d 个 Worker 处理消息", workerNum)
+
+	// 阻塞直到连接断开或收到关闭信号
+	select {
+	case <-c.closeCh:
+	case <-connClose:
+		log.Println("RabbitMQ 连接断开")
+	case <-chClose:
+		log.Println("RabbitMQ 通道断开")
+	}
+
+	wg.Wait()
 }
 
-// processMessage 处理单条消息
+func (c *ReliableConsumer) worker(workerID int, msgs <-chan amqp.Delivery, wg *sync.WaitGroup) {
+	defer wg.Done()
+
+	for d := range msgs {
+		c.processMessage(workerID, d)
+	}
+}
+
 func (c *ReliableConsumer) processMessage(workerID int, d amqp.Delivery) {
-    // 1. 解析消息元数据
-    var msg OrderMsg
-    metadata := c.extractMetadata(d)
+	var msg OrderMsg
+	metadata := c.extractMetadata(d)
 
-    // 2. 解析消息体
-    if err := json.Unmarshal(d.Body, &msg); err != nil {
-        log.Printf("❌ [Worker-%d] 消息解析失败: %v，MessageID=%s，Body=%s",
-            workerID, err, metadata.MessageID, string(d.Body))
-        // 解析失败的消息直接丢弃
-        d.Ack(false)
-        return
-    }
+	if err := json.Unmarshal(d.Body, &msg); err != nil {
+		log.Printf("[Worker-%d] 消息解析失败: %v", workerID, err)
+		d.Ack(false)
+		return
+	}
 
-    log.Printf("📨 [Worker-%d] 收到消息: OrderNo=%s，MessageID=%s，重试次数=%d",
-        workerID, msg.OrderNo, metadata.MessageID, metadata.RetryCount)
+	log.Printf("[Worker-%d] 收到消息: OrderNo=%s，重试=%d",
+		workerID, msg.OrderNo, metadata.RetryCount)
 
-    // 3. 获取当前重试次数
-    retryCount := c.getRetryCount(d)
-    maxRetries := c.config.MaxRetryTimes
-    if maxRetries <= 0 {
-        maxRetries = 3
-    }
+	retryCount := c.getRetryCount(d)
+	maxRetries := c.cfg.MaxRetryTimes
+	if maxRetries <= 0 {
+		maxRetries = 3
+	}
 
-    // 4. 执行业务处理
-    ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-    defer cancel()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 
-    // 4.1 Redis 幂等检查
-    idempotentKey := fmt.Sprintf("idempotent:order:%s", msg.OrderNo)
-    acquired, err := c.rdb.SetNX(ctx, idempotentKey, metadata.MessageID, 24*time.Hour).Result()
-    if err != nil {
-        log.Printf("⚠️ [Worker-%d] Redis 连接异常，暂缓消费: %v", workerID, err)
-        d.Nack(false, true) // 重回队列，稍后重试
-        return
-    }
+	// 幂等检查
+	idempotentKey := fmt.Sprintf("{idempotent}:order:%s", msg.OrderNo)
+	acquired, err := c.rdb.SetNX(ctx, idempotentKey, metadata.MessageID, 24*time.Hour).Result()
+	if err != nil {
+		d.Nack(false, true)
+		return
+	}
+	if !acquired {
+		d.Ack(false)
+		return
+	}
 
-    if !acquired {
-        // 幂等命中，说明已处理过
-        log.Printf("♻️ [Worker-%d] 幂等拦截，重复消息: OrderNo=%s", workerID, msg.OrderNo)
-        d.Ack(false)
-        return
-    }
+	// 执行落库
+	expireTime := time.Unix(msg.ExpireTime, 0)
+	newOrder := &repo.Order{
+		OrderNo:     msg.OrderNo,
+		UserID:      msg.UserID,
+		ProductID:   msg.ProductID,
+		Count:       msg.Count,
+		TotalAmount: msg.TotalAmount,
+		Status:      0,
+		ExpireTime:  &expireTime,
+	}
 
-    // 4.2 执行落库
-    expireTime := time.Unix(msg.ExpireTime, 0)
-    newOrder := &repo.Order{
-        OrderNo:     msg.OrderNo,
-        UserID:      msg.UserID,
-        ProductID:   msg.ProductID,
-        Count:       msg.Count,
-        TotalAmount: msg.TotalAmount,
-        Status:      0,
-        ExpireTime:  &expireTime,
-    }
+	err = c.orderRepo.CreateOrderTx(ctx, newOrder, expireTime, msg.Count)
+	if err != nil {
+		log.Printf("[Worker-%d] 落库失败: OrderNo=%s, Err=%v, 重试=%d/%d",
+			workerID, msg.OrderNo, err, retryCount, maxRetries)
+		c.rdb.Del(ctx, idempotentKey)
 
-    err = c.orderRepo.CreateOrderTx(ctx, newOrder, expireTime, msg.Count)
+		if retryCount >= maxRetries {
+			metrics.MQConsumeTotal.WithLabelValues("order.created", "dql").Inc()
+			c.handleDeadLetter(workerID, d, msg, err, metadata)
+		} else {
+			metrics.MQConsumeTotal.WithLabelValues("order.created", "fail").Inc()
+			d.Nack(false, true)
+		}
+		return
+	}
 
-    // 5. 处理结果
-    if err != nil {
-        log.Printf("❌ [Worker-%d] 落库失败: OrderNo=%s，Err=%v，重试次数=%d/%d",
-            workerID, msg.OrderNo, err, retryCount, maxRetries)
-
-        // 删除幂等锁，允许重试
-        c.rdb.Del(ctx, idempotentKey)
-
-        if retryCount >= maxRetries {
-            // 超过最大重试次数，发送到死信队列
-            c.handleDeadLetter(workerID, d, msg, err, metadata)
-        } else {
-            // 还在重试次数内，重回队列
-            d.Nack(false, true)
-        }
-        return
-    }
-
-    // 6. 成功，发送 ACK
-    log.Printf("✅ [Worker-%d] 落库成功: OrderNo=%s，MessageID=%s",
-        workerID, msg.OrderNo, metadata.MessageID)
-    d.Ack(false)
+	log.Printf("[Worker-%d] 落库成功: OrderNo=%s", workerID, msg.OrderNo)
+	metrics.MQConsumeTotal.WithLabelValues("order.created", "success").Inc()
+	d.Ack(false)
 }
 
-// handleDeadLetter 处理死信
 func (c *ReliableConsumer) handleDeadLetter(workerID int, d amqp.Delivery, msg OrderMsg, err error, metadata MessageMetadata) {
-    if !c.config.EnableDLQ {
-        log.Printf("⚠️ [Worker-%d] DLQ未启用，消息将被丢弃: OrderNo=%s", workerID, msg.OrderNo)
-        d.Ack(false) // 不启用DLQ时，直接丢弃
-        return
-    }
+	if !c.cfg.EnableDLQ {
+		d.Ack(false)
+		return
+	}
 
-    // 构建死信消息体
-    deadLetter := map[string]interface{}{
-        "originalMessage":  msg,
-        "metadata":        metadata,
-        "error":           err.Error(),
-        "failedAt":        time.Now().Format(time.RFC3339),
-        "retryCount":      metadata.RetryCount,
-    }
+	deadLetter := map[string]interface{}{
+		"originalMessage": msg,
+		"error":           err.Error(),
+		"failedAt":        time.Now().Format(time.RFC3339),
+		"retryCount":      metadata.RetryCount,
+	}
+	body, _ := json.Marshal(deadLetter)
 
-    body, _ := json.Marshal(deadLetter)
+	pubErr := c.channel.PublishWithContext(context.Background(),
+		c.cfg.DLQExchangeName, "dlq", false, false,
+		amqp.Publishing{
+			ContentType:  "application/json",
+			DeliveryMode: amqp.Persistent,
+			Body:         body,
+		})
 
-    // 发布到死信交换机
-    err = c.channel.PublishWithContext(context.Background(),
-        c.config.DLQExchangeName,
-        "dlq", // routing key
-        false, // mandatory
-        false, // immediate
-        amqp.Publishing{
-            ContentType:  "application/json",
-            DeliveryMode: amqp.Persistent,
-            Body:         body,
-            Headers: amqp.Table{
-                "x-first-death-reason": "rejected",
-                "x-death-time":         time.Now().Unix(),
-            },
-        })
-
-    if err != nil {
-        log.Printf("❌ [Worker-%d] 发送死信失败: OrderNo=%s，Err=%v，消息将被丢弃",
-            workerID, msg.OrderNo, err)
-    } else {
-        log.Printf("☠️ [Worker-%d] 消息已发送到死信队列: OrderNo=%s，DLQ=%s",
-            workerID, msg.OrderNo, c.config.DLQQueueName)
-    }
-
-    // 确认原消息
-    d.Ack(false)
+	if pubErr != nil {
+		log.Printf("[Worker-%d] 发送死信失败: OrderNo=%s, Err=%v", workerID, msg.OrderNo, pubErr)
+	} else {
+		log.Printf("[Worker-%d] 消息已入死信队列: OrderNo=%s", workerID, msg.OrderNo)
+	}
+	d.Ack(false)
 }
 
-// extractMetadata 从消息头提取元数据
 func (c *ReliableConsumer) extractMetadata(d amqp.Delivery) MessageMetadata {
-    metadata := MessageMetadata{
-        MessageID: uuid.New().String(),
-        TraceID:   uuid.New().String(),
-        RetryCount: 0,
-        FirstTry:   time.Now(),
-    }
-
-    // 从 headers 中提取 MessageID
-    if d.Headers != nil {
-        if msgID, ok := d.Headers["x-message-id"].(string); ok {
-            metadata.MessageID = msgID
-        }
-        if retryCount, ok := d.Headers["x-retry-count"].(int32); ok {
-            metadata.RetryCount = int(retryCount)
-        }
-    }
-
-    // 如果没有 MessageID，使用 DeliveryTag
-    if metadata.MessageID == "" {
-        metadata.MessageID = fmt.Sprintf("%d", d.DeliveryTag)
-    }
-
-    return metadata
+	metadata := MessageMetadata{
+		MessageID: uuid.New().String(),
+		TraceID:   uuid.New().String(),
+		FirstTry:  time.Now(),
+	}
+	if d.Headers != nil {
+		if msgID, ok := d.Headers["x-message-id"].(string); ok {
+			metadata.MessageID = msgID
+		}
+	}
+	if metadata.MessageID == "" {
+		metadata.MessageID = fmt.Sprintf("%d", d.DeliveryTag)
+	}
+	return metadata
 }
 
-// getRetryCount 获取消息重试次数
 func (c *ReliableConsumer) getRetryCount(d amqp.Delivery) int {
-    if d.Headers == nil {
-        return 0
-    }
-
-    // 从 x-death 头中获取重试次数
-    if xDeath, ok := d.Headers["x-death"].([]interface{}); ok && len(xDeath) > 0 {
-        for _, death := range xDeath {
-            if deathMap, ok := death.(amqp.Table); ok {
-                if count, ok := deathMap["count"].(int64); ok {
-                    return int(count)
-                }
-            }
-        }
-    }
-
-    // 从自定义头获取
-    if retryCount, ok := d.Headers["x-retry-count"].(int32); ok {
-        return int(retryCount)
-    }
-
-    return 0
+	if d.Headers == nil {
+		return 0
+	}
+	if xDeath, ok := d.Headers["x-death"].([]interface{}); ok && len(xDeath) > 0 {
+		if deathMap, ok := xDeath[0].(amqp.Table); ok {
+			if count, ok := deathMap["count"].(int64); ok {
+				return int(count)
+			}
+		}
+	}
+	return 0
 }

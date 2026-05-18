@@ -1,0 +1,179 @@
+# =============================================================================
+# MySQL Slave (Replica) - 只读节点
+# 使用 postStart hook 在 MySQL 启动后配置复制
+# =============================================================================
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-slave-config
+  namespace: ecommerce
+data:
+  slave.cnf: |
+    [mysqld]
+    server-id=2
+    relay-log=relay-log
+    read_only=ON
+    log-bin=mysql-bin
+    binlog_format=ROW
+    character-set-server=utf8mb4
+    collation-server=utf8mb4_unicode_ci
+    default-time-zone='+08:00'
+    max_connections=500
+    default-authentication-plugin=mysql_native_password
+    [client]
+    default-character-set=utf8mb4
+  setup-replication.sh: |
+    #!/bin/bash
+    set -e
+    echo "[SETUP] Starting replication setup..."
+    sleep 5
+
+    # Wait for local MySQL to be ready
+    for i in $(seq 1 30); do
+      if mysqladmin ping -uroot -proot123456 --silent 2>/dev/null; then
+        echo "[SETUP] Local MySQL ready."
+        break
+      fi
+      echo "  Waiting for local MySQL... ($i)"
+      sleep 3
+    done
+
+    # Wait for master
+    echo "[SETUP] Waiting for master..."
+    until mysqladmin ping -h mysql-master -uroot -proot123456 --silent 2>/dev/null; do
+      echo "  Waiting for master..."
+      sleep 3
+    done
+
+    # Check if already configured
+    if mysql -uroot -proot123456 -e "SHOW SLAVE STATUS\G" 2>/dev/null | grep -q "Slave_IO_Running"; then
+      echo "[SETUP] Replication already configured."
+      exit 0
+    fi
+
+    # Get master position
+    MASTER_STATUS=$(mysql -h mysql-master -uroot -proot123456 -e "SHOW MASTER STATUS\G" 2>/dev/null)
+    MASTER_LOG_FILE=$(echo "$MASTER_STATUS" | grep "File:" | awk '{print $2}')
+    MASTER_LOG_POS=$(echo "$MASTER_STATUS" | grep "Position:" | awk '{print $2}')
+    echo "[SETUP] Master: $MASTER_LOG_FILE:$MASTER_LOG_POS"
+
+    # Create repl user on master
+    mysql -h mysql-master -uroot -proot123456 -e "
+      CREATE USER IF NOT EXISTS 'repl'@'%' IDENTIFIED BY 'repl123456';
+      GRANT REPLICATION SLAVE ON *.* TO 'repl'@'%';
+      FLUSH PRIVILEGES;
+    " 2>/dev/null
+
+    # Configure and start slave
+    mysql -uroot -proot123456 -e "
+      STOP SLAVE;
+      CHANGE MASTER TO
+        MASTER_HOST='mysql-master',
+        MASTER_USER='repl',
+        MASTER_PASSWORD='repl123456',
+        MASTER_LOG_FILE='$MASTER_LOG_FILE',
+        MASTER_LOG_POS=$MASTER_LOG_POS;
+      START SLAVE;
+    " 2>/dev/null
+
+    sleep 3
+    echo "[SETUP] Replication status:"
+    mysql -uroot -proot123456 -e "SHOW SLAVE STATUS\G" 2>/dev/null | grep -E "Slave_IO_Running|Slave_SQL_Running|Seconds_Behind_Master|Last_Error|Master_Log_File"
+    echo "[SETUP] Done."
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-slave
+  namespace: ecommerce
+spec:
+  type: ClusterIP
+  selector:
+    app: mysql-slave
+  ports:
+    - name: mysql
+      port: 3306
+      targetPort: 3306
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: mysql-slave-pvc
+  namespace: ecommerce
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mysql-slave
+  namespace: ecommerce
+  labels:
+    app: mysql-slave
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mysql-slave
+  template:
+    metadata:
+      labels:
+        app: mysql-slave
+    spec:
+      containers:
+        - name: mysql
+          image: mysql:8.0
+          ports:
+            - containerPort: 3306
+              name: mysql
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ecommerce-secrets
+                  key: mysql-password
+          lifecycle:
+            postStart:
+              exec:
+                command: ["bash", "/scripts/setup-replication.sh"]
+          volumeMounts:
+            - name: config
+              mountPath: /etc/mysql/conf.d/slave.cnf
+              subPath: slave.cnf
+            - name: scripts
+              mountPath: /scripts
+            - name: data
+              mountPath: /var/lib/mysql
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          readinessProbe:
+            exec:
+              command: ["mysqladmin", "ping", "-uroot", "-proot123456"]
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["mysqladmin", "ping", "-uroot", "-proot123456"]
+            initialDelaySeconds: 60
+            periodSeconds: 20
+      volumes:
+        - name: config
+          configMap:
+            name: mysql-slave-config
+        - name: scripts
+          configMap:
+            name: mysql-slave-config
+            defaultMode: 0755
+        - name: data
+          persistentVolumeClaim:
+            claimName: mysql-slave-pvc

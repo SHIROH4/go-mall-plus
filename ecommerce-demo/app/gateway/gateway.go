@@ -11,6 +11,7 @@ import (
 	"ecommerce-demo/common/response"
 	customValidator "ecommerce-demo/common/validator"
 
+	_ "ecommerce-demo/common/metrics" // 注册业务 Prometheus 指标
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/zeromicro/go-zero/core/conf"
 	"github.com/zeromicro/go-zero/rest"

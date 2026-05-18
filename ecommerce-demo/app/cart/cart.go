@@ -1,8 +1,11 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
+	"log"
+	"time"
 
 	"ecommerce-demo/app/cart/internal/config"
 	cartredis "ecommerce-demo/app/cart/internal/repo/redis"
@@ -28,11 +31,23 @@ func main() {
 	conf.MustLoad(*configFile, &c)
 
 	// 初始化 Redis 客户端
-	rdb := goredis.NewClient(&goredis.Options{
-		Addr:     c.RedisConf.Host,
+	rdb := goredis.NewClusterClient(&goredis.ClusterOptions{
+		Addrs:    []string{c.RedisConf.Host},
 		Password: c.RedisConf.Pass,
-		DB:       0,
 	})
+
+	// 预热 Redis 连接池，避免懒连接导致首请求超时
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	for {
+		if err := rdb.Ping(ctx).Err(); err != nil {
+			log.Printf("Redis 连接中... (%v)", err)
+			time.Sleep(2 * time.Second)
+			continue
+		}
+		log.Println("Redis 连接就绪")
+		break
+	}
 
 	// 初始化依赖
 	cartRepo := cartredis.NewCartRedisRepo(rdb)

@@ -34,11 +34,11 @@ func (Stock) TableName() string {
 
 type productRepoImpl struct {
 	db  *gorm.DB
-	rdb *redis.Client
+	rdb *redis.ClusterClient
 	sfg singleflight.Group // [新增] 防缓存击穿的核心并发控制组
 }
 
-func NewProductRepo(db *gorm.DB, rdb *redis.Client) repo.ProductRepo {
+func NewProductRepo(db *gorm.DB, rdb *redis.ClusterClient) repo.ProductRepo {
 	return &productRepoImpl{
 		db:  db,
 		rdb: rdb,
@@ -46,7 +46,7 @@ func NewProductRepo(db *gorm.DB, rdb *redis.Client) repo.ProductRepo {
 }
 
 func (r *productRepoImpl) GetProductByID(ctx context.Context, id int64) (*repo.Product, error) {
-	cacheKey := fmt.Sprintf("product:info:%d", id)
+	cacheKey := fmt.Sprintf("{product}:info:%d", id)
 
 	// ==========================================
 	// 1. 第一层查询：直接查 Redis (常规流程)
@@ -188,7 +188,7 @@ func (r *productRepoImpl) AddProduct(ctx context.Context, p *repo.Product, stock
 	}
 
 	// 3. 同步库存到 Redis（用于订单服务扣减）
-	stockKey := fmt.Sprintf("stock:%d", p.ID)
+	stockKey := fmt.Sprintf("{stock}:%d", p.ID)
 	if err := r.rdb.SetNX(ctx, stockKey, stock, 0).Err(); err != nil {
 		fmt.Printf("⚠️ 库存同步到Redis失败: ProductID=%d, Stock=%d, Err=%v\n", p.ID, stock, err)
 	}
@@ -223,7 +223,7 @@ func (r *productRepoImpl) UpdateProduct(ctx context.Context, p *repo.Product) er
 		}
 
 		// 清除缓存
-		cacheKey := fmt.Sprintf("product:info:%d", p.ID)
+		cacheKey := fmt.Sprintf("{product}:info:%d", p.ID)
 		r.rdb.Del(ctx, cacheKey)
 
 		return nil
@@ -252,7 +252,7 @@ func (r *productRepoImpl) DeleteProduct(ctx context.Context, id int64) error {
 		}
 
 		// 3. 清除缓存
-		cacheKey := fmt.Sprintf("product:info:%d", id)
+		cacheKey := fmt.Sprintf("{product}:info:%d", id)
 		r.rdb.Del(ctx, cacheKey)
 
 		return nil
@@ -374,7 +374,7 @@ func (r *productRepoImpl) GetStock(ctx context.Context, productID int64) (int32,
 
 // GetStockFromCache 从 Redis 获取库存
 func (r *productRepoImpl) GetStockFromCache(ctx context.Context, productID int64) (int32, error) {
-	stockKey := fmt.Sprintf("stock:%d", productID)
+	stockKey := fmt.Sprintf("{stock}:%d", productID)
 	val, err := r.rdb.Get(ctx, stockKey).Int()
 	if err != nil {
 		return 0, err
@@ -384,7 +384,7 @@ func (r *productRepoImpl) GetStockFromCache(ctx context.Context, productID int64
 
 // SetStockCache 设置库存到 Redis（缓存未命中时调用）
 func (r *productRepoImpl) SetStockCache(ctx context.Context, productID int64, stock int32) error {
-	stockKey := fmt.Sprintf("stock:%d", productID)
+	stockKey := fmt.Sprintf("{stock}:%d", productID)
 	// 设置 10 分钟过期，带随机抖动防雪崩
 	jitter := time.Duration(rand.Intn(120)) * time.Second
 	expiration := 10*time.Minute + jitter
@@ -402,7 +402,7 @@ func (r *productRepoImpl) InitStockCache(ctx context.Context) error {
 	successCount := 0
 	failCount := 0
 	for _, s := range stocks {
-		stockKey := fmt.Sprintf("stock:%d", s.ProductID)
+		stockKey := fmt.Sprintf("{stock}:%d", s.ProductID)
 		// 使用 SetNX 只在 key 不存在时设置，避免覆盖已有的正确数据
 		// 如果失败，使用 Set 强制覆盖
 		if err := r.rdb.SetNX(ctx, stockKey, s.StockNum, 0).Err(); err != nil {

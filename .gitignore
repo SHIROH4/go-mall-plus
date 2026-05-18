@@ -105,3 +105,6 @@ deploy/kind/context/
 .AppleDouble
 .LSOverride
 ._*
+.claude/
+ecommerce-demo/.monitor-pids/
+ecommerce-demo/.prometheus-data/

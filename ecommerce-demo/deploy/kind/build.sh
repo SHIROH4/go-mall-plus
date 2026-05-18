@@ -21,7 +21,7 @@ log_warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
 # Service list
-SERVICES=("gateway" "user" "product" "cart" "order" "payment" "address")
+SERVICES=("gateway" "user" "product" "cart" "order" "payment" "address" "stock")
 ORDER_WORKERS=("order-delay" "order-cron" "order-dlq")
 
 # Output directory
@@ -78,6 +78,10 @@ build_binaries() {
     # Address
     log_info "Building address..."
     go build -ldflags='-w -s' -o "$OUTPUT_DIR/address" ./app/address/address.go
+
+    # Stock
+    log_info "Building stock..."
+    go build -ldflags='-w -s' -o "$OUTPUT_DIR/stock" ./app/stock/stock.go
 
     log_info "All binaries built successfully!"
 }

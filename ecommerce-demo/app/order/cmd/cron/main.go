@@ -46,8 +46,8 @@ func main() {
     }
 
     // 初始化 Redis（用于库存回滚）
-    rdb := redis.NewClient(&redis.Options{
-        Addr:     c.RedisConf.Host,
+    rdb := redis.NewClusterClient(&redis.ClusterOptions{
+        Addrs:    []string{c.RedisConf.Host},
         Password: c.RedisConf.Pass,
     })
 

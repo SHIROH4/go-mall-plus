@@ -1,6 +1,3 @@
-// Code scaffolded by goctl. Safe to edit.
-// goctl 1.9.2
-
 package config
 
 import (
@@ -31,10 +28,43 @@ type Config struct {
 		Database string
 	}
 
+	// 限流配置
+	RateLimit struct {
+		Enabled bool
+		Global  struct {
+			Rate  int
+			Burst int
+		}
+		PerIP struct {
+			Rate  int
+			Burst int
+		}
+		Routes map[string]struct {
+			Rate  int
+			Burst int
+		}
+	}
+
+	// CORS 配置
+	CORS struct {
+		Enabled        bool
+		AllowedOrigins []string
+		AllowedMethods []string
+		AllowedHeaders []string
+		MaxAge         int
+	}
+
+	// 断路器配置（应用于 RPC 客户端）
+	CircuitBreaker struct {
+		Enabled   bool
+		Threshold int // 触发熔断的失败率阈值（百分比，默认 50）
+	}
+
 	// RPC 客户端发现配置
 	UserRpcConf    zrpc.RpcClientConf
 	ProductRpcConf zrpc.RpcClientConf
 	OrderRpcConf   zrpc.RpcClientConf
+	StockRpcConf   zrpc.RpcClientConf // 库存 RPC
 	CartRpcConf    zrpc.RpcClientConf // 购物车 RPC
 	PaymentRpcConf zrpc.RpcClientConf // 支付 RPC
 	AddressRpcConf zrpc.RpcClientConf // 地址 RPC

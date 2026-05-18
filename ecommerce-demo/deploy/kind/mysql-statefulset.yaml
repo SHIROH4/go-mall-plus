@@ -1,0 +1,170 @@
+# =============================================================================
+# MySQL StatefulSet — StatefulSet 模式主从集群
+# mysql-0 = Master, mysql-1 = Slave (自动复制)
+# 写: mysql-write:3306  (应用层使用)
+# =============================================================================
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-cluster-config
+  namespace: ecommerce
+data:
+  my.cnf: |
+    [mysqld]
+    character-set-server=utf8mb4
+    collation-server=utf8mb4_unicode_ci
+    default-time-zone='+08:00'
+    max_connections=1000
+    default-authentication-plugin=mysql_native_password
+    log-bin=mysql-bin
+    binlog_format=ROW
+    binlog_row_image=FULL
+    binlog_expire_logs_seconds=604800
+    max_binlog_size=256M
+    sync_binlog=1
+    innodb_flush_log_at_trx_commit=1
+  setup-server-id.sh: |
+    #!/bin/bash
+    ORDINAL=${HOSTNAME##*-}
+    SID=$((ORDINAL + 1))
+    echo "server-id=$SID" > /etc/mysql/conf.d/server-id.cnf
+    if [ "$ORDINAL" != "0" ]; then
+      echo "read_only=ON" >> /etc/mysql/conf.d/server-id.cnf
+      echo "relay-log=relay-log" >> /etc/mysql/conf.d/server-id.cnf
+      echo "mysql-$ORDINAL: Slave mode (server-id=$SID)"
+    else
+      echo "mysql-0: Master mode (server-id=1)"
+    fi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql
+  namespace: ecommerce
+  labels: {app: mysql}
+spec:
+  clusterIP: None
+  selector: {app: mysql}
+  ports: [{name: mysql, port: 3306}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-write
+  namespace: ecommerce
+spec:
+  type: ClusterIP
+  selector: {app: mysql}
+  ports: [{name: mysql, port: 3306, targetPort: 3306}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mysql-read
+  namespace: ecommerce
+spec:
+  type: ClusterIP
+  selector: {app: mysql}
+  ports: [{name: mysql, port: 3306, targetPort: 3306}]
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mysql
+  namespace: ecommerce
+  labels: {app: mysql}
+spec:
+  serviceName: mysql
+  replicas: 2
+  selector:
+    matchLabels: {app: mysql}
+  template:
+    metadata:
+      labels: {app: mysql}
+    spec:
+      initContainers:
+        - name: setup-config
+          image: mysql:8.0
+          command: ["bash", "/scripts/setup-server-id.sh"]
+          volumeMounts:
+            - {name: scripts, mountPath: /scripts}
+            - {name: config-dir, mountPath: /etc/mysql/conf.d}
+      containers:
+        - name: mysql
+          image: mysql:8.0
+          ports: [{containerPort: 3306, name: mysql}]
+          env:
+            - name: MYSQL_ROOT_PASSWORD
+              valueFrom: {secretKeyRef: {name: ecommerce-secrets, key: mysql-password}}
+          command: ["bash", "-c"]
+          args:
+            - |
+              ORDINAL=${HOSTNAME##*-}
+              if [ "$ORDINAL" = "0" ]; then
+                echo "Master node starting..."
+                docker-entrypoint.sh mysqld &
+                PID=$!
+                sleep 10
+                # 创建复制用户
+                for i in $(seq 1 30); do
+                  if mysqladmin ping -uroot -proot123456 --silent 2>/dev/null; then break; fi; sleep 2
+                done
+                mysql -uroot -proot123456 -e "
+                  CREATE USER IF NOT EXISTS 'repl'@'%' IDENTIFIED BY 'repl123456';
+                  GRANT REPLICATION SLAVE ON *.* TO 'repl'@'%';
+                  FLUSH PRIVILEGES;" 2>/dev/null
+                wait $PID
+              else
+                echo "Slave node starting..."
+                docker-entrypoint.sh mysqld &
+                PID=$!
+                sleep 10
+                # 等待本地和master就绪
+                for i in $(seq 1 30); do
+                  if mysqladmin ping -uroot -proot123456 --silent 2>/dev/null; then break; fi; sleep 2
+                done
+                for i in $(seq 1 30); do
+                  if mysqladmin ping -h mysql-0.mysql -uroot -proot123456 --silent 2>/dev/null; then break; fi; sleep 3
+                done
+                # 配置复制
+                if ! mysql -uroot -proot123456 -e "SHOW SLAVE STATUS\G" 2>/dev/null | grep -q "Slave_IO_Running"; then
+                  MS=$(mysql -h mysql-0.mysql -uroot -proot123456 -e "SHOW MASTER STATUS\G" 2>/dev/null)
+                  MF=$(echo "$MS" | grep "File:" | awk '{print $2}')
+                  MP=$(echo "$MS" | grep "Position:" | awk '{print $2}')
+                  mysql -uroot -proot123456 -e "
+                    STOP SLAVE;
+                    CHANGE MASTER TO MASTER_HOST='mysql-0.mysql',MASTER_USER='repl',MASTER_PASSWORD='repl123456',MASTER_LOG_FILE='$MF',MASTER_LOG_POS=$MP;
+                    START SLAVE;" 2>/dev/null
+                  echo "Slave started."
+                fi
+                wait $PID
+              fi
+          volumeMounts:
+            - {name: config, mountPath: /etc/mysql/conf.d/my.cnf, subPath: my.cnf}
+            - {name: config-dir, mountPath: /etc/mysql/conf.d}
+            - {name: scripts, mountPath: /scripts}
+            - {name: data, mountPath: /var/lib/mysql}
+          resources: {requests: {cpu: 200m, memory: 512Mi}, limits: {cpu: 1000m, memory: 1Gi}}
+          readinessProbe:
+            exec:
+              command: ["mysqladmin", "ping", "-uroot", "-proot123456"]
+            initialDelaySeconds: 50
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["mysqladmin", "ping", "-uroot", "-proot123456"]
+            initialDelaySeconds: 120
+            periodSeconds: 20
+      volumes:
+        - name: config
+          configMap: {name: mysql-cluster-config, items: [{key: "my.cnf", path: "my.cnf"}]}
+        - name: scripts
+          configMap: {name: mysql-cluster-config, items: [{key: "setup-server-id.sh", path: "setup-server-id.sh"}], defaultMode: 0755}
+        - name: config-dir
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources: {requests: {storage: 5Gi}}

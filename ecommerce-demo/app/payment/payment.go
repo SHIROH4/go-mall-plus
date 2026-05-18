@@ -4,11 +4,12 @@ import (
 	"flag"
 	"fmt"
 
+	orderclient "ecommerce-demo/app/order/order"
 	"ecommerce-demo/app/payment/internal/config"
 	"ecommerce-demo/app/payment/internal/server"
 	"ecommerce-demo/app/payment/internal/svc"
 	"ecommerce-demo/app/payment/pb"
-	orderclient "ecommerce-demo/app/order/order"
+	"ecommerce-demo/common/metrics/rpcmetrics"
 
 	"github.com/zeromicro/go-zero/core/conf"
 	"github.com/zeromicro/go-zero/core/service"
@@ -28,7 +29,7 @@ func main() {
 	// 初始化 Order RPC 客户端（用于支付成功后通知订单）
 	var orderRpc orderclient.Order
 	if c.OrderRpcConf.Endpoints != nil {
-		orderRpc = orderclient.NewOrder(zrpc.MustNewClient(c.OrderRpcConf))
+		orderRpc = orderclient.NewOrder(zrpc.MustNewClient(c.OrderRpcConf, zrpc.WithUnaryClientInterceptor(rpcmetrics.UnaryClientInterceptor())))
 	}
 
 	// 初始化服务上下文

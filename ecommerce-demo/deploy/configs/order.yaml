@@ -1,14 +1,57 @@
 Name: order.rpc
-ListenOn: 0.0.0.0:8080
+ListenOn: 0.0.0.0:8082
 Etcd:
   Hosts:
     - etcd:2379
   Key: order.rpc
+
 DataSource: root:root123456@tcp(mysql:3306)/ecommerce_demo?charset=utf8mb4&parseTime=True&loc=Local
-RedisHost: redis:6379
-RedisPass: redis123456
-KafkaConf:
-  Brokers:
-    - kafka:9092
-  Topic: order_delay
-  Group: order-consumer
+
+RedisConf:
+  Host: redis-cluster:6379
+  Type: node
+  Pass: redis123456
+
+ProductRpcConf:
+  Etcd:
+    Hosts:
+      - etcd:2379
+    Key: product.rpc
+
+StockRpcConf:
+  Etcd:
+    Hosts:
+      - etcd:2379
+    Key: stock.rpc
+
+Outbox:
+  pollIntervalSeconds: 2
+  batchSize: 50
+
+RabbitMQ:
+  Url: amqp://guest:guest@rabbitmq:5672/
+  QueueName: order_create_queue
+
+OrderTimeout:
+  orderExpireMinutes: 30
+  delayQueueName: order.delay.queue
+  delayExchangeName: order.delay.exchange
+  scanIntervalSeconds: 60
+  maxScanCount: 100
+
+MQConsumer:
+  prefetchCount: 10
+  maxRetryTimes: 3
+  retryDelay: 5
+  enableDLQ: true
+  dlqExchangeName: order.dlx
+  dlqQueueName: order.dlq
+  consumerTag: order-consumer
+  shutdownTimeout: 30
+
+# OpenTelemetry 链路追踪配置
+Telemetry:
+  Name: order.rpc
+  Endpoint: http://jaeger:14268/api/traces
+  Sampler: 1.0
+  Batcher: jaeger

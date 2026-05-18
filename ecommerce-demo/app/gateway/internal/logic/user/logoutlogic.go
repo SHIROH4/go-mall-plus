@@ -58,7 +58,7 @@ func (l *LogoutLogic) Logout() (resp *types.LogoutResp, err error) {
 	// 2. 使该用户的 RefreshToken 也失效
 	userId, err := ctxutil.GetUserId(l.ctx)
 	if err == nil && userId > 0 {
-		l.svcCtx.RDB.Del(l.ctx, fmt.Sprintf("refresh_jti:%d", userId))
+		l.svcCtx.RDB.Del(l.ctx, fmt.Sprintf("{refresh}:jti:%d", userId))
 	}
 
 	l.Infof("用户登出，Access JTI: %s", jti)

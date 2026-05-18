@@ -1,0 +1,181 @@
+# =============================================================================
+# Redis Cluster StatefulSet — 6 节点 (3 Master + 3 Replica)
+#
+# 架构:
+#   redis-0, redis-1, redis-2 → Master (各负责 1/3 的 hash slots)
+#   redis-3, redis-4, redis-5 → Replica (各对应一个 Master)
+#
+# 访问:
+#   应用直连: redis-cluster:6379 (ClusterIP → 任意节点)
+#   Redis Cluster 协议自动处理 MOVED 重定向
+# =============================================================================
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: redis-cluster-config
+  namespace: ecommerce
+data:
+  redis.conf: |
+    port 6379
+    cluster-enabled yes
+    cluster-config-file /data/nodes.conf
+    cluster-node-timeout 5000
+    appendonly yes
+    appendfsync everysec
+    save 900 1
+    save 300 10
+    requirepass redis123456
+    masterauth redis123456
+    maxmemory 128mb
+    maxmemory-policy allkeys-lru
+---
+# Headless Service — Pod 间通信 (redis-0.redis-headless, ...)
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-headless
+  namespace: ecommerce
+  labels: {app: redis-cluster}
+spec:
+  clusterIP: None
+  selector: {app: redis-cluster}
+  ports:
+    - {name: redis, port: 6379}
+    - {name: cluster, port: 16379}
+---
+# ClusterIP Service — 应用层访问
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-cluster
+  namespace: ecommerce
+  labels: {app: redis-cluster}
+spec:
+  type: ClusterIP
+  selector: {app: redis-cluster}
+  ports:
+    - {name: redis, port: 6379, targetPort: 6379}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: redis
+  namespace: ecommerce
+  labels: {app: redis-cluster}
+spec:
+  serviceName: redis-headless
+  replicas: 6
+  selector:
+    matchLabels: {app: redis-cluster}
+  template:
+    metadata:
+      labels: {app: redis-cluster}
+    spec:
+      containers:
+        - name: redis
+          image: redis:7.0-alpine
+          command: ["sh", "-c"]
+          args:
+            - |
+              # 清除所有旧状态：集群拓扑 + 持久化数据
+              # 避免 Pod IP 变更导致集群分裂，避免 RDB 残留脏数据阻碍集群创建
+              rm -f /data/nodes.conf /data/dump.rdb /data/appendonly.aof
+              exec redis-server /etc/redis/redis.conf
+          ports:
+            - {containerPort: 6379, name: redis}
+            - {containerPort: 16379, name: cluster}
+          volumeMounts:
+            - {name: config, mountPath: /etc/redis}
+            - {name: data, mountPath: /data}
+          resources: {requests: {cpu: 50m, memory: 64Mi}, limits: {cpu: 200m, memory: 256Mi}}
+          readinessProbe:
+            exec:
+              command: ["redis-cli", "-a", "redis123456", "ping"]
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            exec:
+              command: ["redis-cli", "-a", "redis123456", "ping"]
+            initialDelaySeconds: 15
+            periodSeconds: 20
+      volumes:
+        - name: config
+          configMap: {name: redis-cluster-config}
+  volumeClaimTemplates:
+    - metadata: {name: data}
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources: {requests: {storage: 1Gi}}
+---
+# Job: 所有 Pod 就绪后自动组建 Redis Cluster
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: redis-cluster-init
+  namespace: ecommerce
+spec:
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        - name: wait-nodes
+          image: redis:7.0-alpine
+          command: ["sh", "-c"]
+          args:
+            - |
+              echo "Waiting for all 6 Redis nodes..."
+              for i in 0 1 2 3 4 5; do
+                for attempt in $(seq 1 60); do
+                  if redis-cli -a redis123456 --no-auth-warning -h redis-${i}.redis-headless ping 2>/dev/null | grep -q PONG; then
+                    echo "  redis-$i ready"
+                    break
+                  fi
+                  sleep 3
+                done
+              done
+              echo "All nodes ready!"
+      containers:
+        - name: create-cluster
+          image: redis:7.0-alpine
+          command: ["sh", "-c"]
+          args:
+            - |
+              NODES="redis-0.redis-headless:6379 redis-1.redis-headless:6379 redis-2.redis-headless:6379 redis-3.redis-headless:6379 redis-4.redis-headless:6379 redis-5.redis-headless:6379"
+
+              # 1. 检查集群是否已健康
+              CLUSTER_OK=$(redis-cli -a redis123456 --no-auth-warning -h redis-0.redis-headless cluster info 2>/dev/null | grep "cluster_state:ok" || true)
+              if [ -n "$CLUSTER_OK" ]; then
+                # 再确认所有节点都能连通
+                ALL_OK=true
+                for node in $NODES; do
+                  if ! redis-cli -a redis123456 --no-auth-warning -h ${node%%:*} -p 6379 PING 2>/dev/null | grep -q PONG; then
+                    ALL_OK=false
+                    break
+                  fi
+                done
+                if $ALL_OK; then
+                  echo "Cluster is healthy, no repair needed."
+                  exit 0
+                fi
+              fi
+
+              # 2. 集群不健康，重置并重建
+              echo "Cluster is broken, repairing..."
+              for node in $NODES; do
+                redis-cli -a redis123456 --no-auth-warning -h ${node%%:*} -p 6379 CLUSTER RESET HARD 2>/dev/null || true
+              done
+              sleep 2
+
+              # 3. 重新创建集群
+              echo "Creating Redis Cluster: 3 masters + 3 replicas..."
+              echo "yes" | redis-cli -a redis123456 --no-auth-warning --cluster create $NODES --cluster-replicas 1 2>&1
+              sleep 3
+
+              echo ""
+              echo "=== Cluster Info ==="
+              redis-cli -a redis123456 --no-auth-warning -h redis-0.redis-headless cluster info 2>&1
+              echo ""
+              echo "=== Cluster Nodes ==="
+              redis-cli -a redis123456 --no-auth-warning -h redis-0.redis-headless cluster nodes 2>&1 | head -6
