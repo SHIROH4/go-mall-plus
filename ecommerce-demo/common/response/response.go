@@ -15,11 +15,11 @@ type Body struct {
 
 var (
 	// 系统级错误（不暴露详情）
-	ErrSystemBusy    = &serverError{Code: 500, Msg: "系统繁忙，请稍后重试"}
-	ErrUnauthorized  = &serverError{Code: 401, Msg: "未授权访问"}
-	ErrForbidden     = &serverError{Code: 403, Msg: "权限不足"}
+	ErrSystemBusy       = &serverError{Code: 500, Msg: "系统繁忙，请稍后重试"}
+	ErrUnauthorized     = &serverError{Code: 401, Msg: "未授权访问"}
+	ErrForbidden        = &serverError{Code: 403, Msg: "权限不足"}
 	ErrResourceNotFound = &serverError{Code: 404, Msg: "资源不存在"}
-	ErrInternalError = &serverError{Code: 500, Msg: "服务器内部错误"}
+	ErrInternalError    = &serverError{Code: 500, Msg: "服务器内部错误"}
 )
 
 // serverError 内部错误结构，用于区分系统错误和业务错误

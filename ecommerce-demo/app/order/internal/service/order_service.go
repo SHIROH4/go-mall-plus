@@ -12,11 +12,12 @@ import (
 	"ecommerce-demo/app/order/internal/mq"
 	"ecommerce-demo/app/order/internal/repo"
 	"ecommerce-demo/app/order/pb"
-	"ecommerce-demo/common/metrics"
 	productclient "ecommerce-demo/app/product/product"
 	stockclient "ecommerce-demo/app/stock/stock"
+	"ecommerce-demo/common/metrics"
 
 	"github.com/bwmarrin/snowflake"
+	"github.com/google/uuid"
 )
 
 var (
@@ -63,22 +64,22 @@ func NewOrderService(
 }
 
 /*
-  CreateOrder 创建订单（重构版：StockRPC + Outbox Pattern）
+CreateOrder 创建订单（重构版：StockRPC + Outbox Pattern）
 
-  业务流程：
-  1. 校验商品信息（ProductRPC）
-  2. Redis Lua 原子扣减库存（StockRPC，独立库存服务）
-  3. 生成订单号（Snowflake）
-  4. 构建 Outbox 出站消息（order.created + order.delay.check）
-  5. MySQL 单事务：扣减 MySQL 库存 + 插入订单 + 写入 Outbox 消息
-  6. 若事务失败 → 回滚 Redis 库存
-  7. 返回订单号
+业务流程：
+1. 校验商品信息（ProductRPC）
+2. Redis Lua 原子扣减库存（StockRPC，独立库存服务）
+3. 生成订单号（Snowflake）
+4. 构建 Outbox 出站消息（order.created + order.delay.check）
+5. MySQL 单事务：扣减 MySQL 库存 + 插入订单 + 写入 Outbox 消息
+6. 若事务失败 → 回滚 Redis 库存
+7. 返回订单号
 
-  原子性保证：
-  - DB 事务保证 order + outbox 要么全部成功，要么全部失败
-  - StockRPC 扣减失败时不会进入 DB 事务
-  - DB 事务失败时回滚 StockRPC 的 Redis 扣减
-  - Outbox Worker 异步将消息投递到 MQ，保证消息不丢
+原子性保证：
+- DB 事务保证 order + outbox 要么全部成功，要么全部失败
+- StockRPC 扣减失败时不会进入 DB 事务
+- DB 事务失败时回滚 StockRPC 的 Redis 扣减
+- Outbox Worker 异步将消息投递到 MQ，保证消息不丢
 */
 func (s *orderServiceImpl) CreateOrder(ctx context.Context, req *pb.CreateOrderReq) (*pb.CreateOrderResp, error) {
 	startTime := time.Now()
@@ -129,6 +130,7 @@ func (s *orderServiceImpl) CreateOrder(ctx context.Context, req *pb.CreateOrderR
 
 	// 5. 构建 Outbox 出站消息
 	createMsgPayload, _ := json.Marshal(mq.OrderMsg{
+		EventID:     uuid.NewString(),
 		OrderNo:     orderNo,
 		UserID:      req.UserId,
 		ProductID:   req.ProductId,
@@ -138,6 +140,7 @@ func (s *orderServiceImpl) CreateOrder(ctx context.Context, req *pb.CreateOrderR
 	})
 
 	delayMsgPayload, _ := json.Marshal(mq.DelayOrderMsg{
+		EventID:    uuid.NewString(),
 		OrderNo:    orderNo,
 		ProductID:  req.ProductId,
 		Count:      req.Count,
@@ -150,13 +153,16 @@ func (s *orderServiceImpl) CreateOrder(ctx context.Context, req *pb.CreateOrderR
 			MessageType: repo.OutboxTypeOrderCreated,
 			Payload:     string(createMsgPayload),
 			Status:      repo.OutboxStatusPending,
+			MaxRetries:  repo.DefaultOutboxMaxRetries,
 			NextRetryAt: time.Now(),
 		},
 		{
 			MessageType: repo.OutboxTypeOrderDelay,
 			Payload:     string(delayMsgPayload),
 			Status:      repo.OutboxStatusPending,
-			NextRetryAt: time.Now().Add(time.Duration(expireMinutes) * time.Minute),
+			MaxRetries:  repo.DefaultOutboxMaxRetries,
+			// 立即投递到 RabbitMQ 延迟队列，由消息 TTL 控制到期时间。
+			NextRetryAt: time.Now(),
 		},
 	}
 
@@ -182,13 +188,13 @@ func (s *orderServiceImpl) CreateOrder(ctx context.Context, req *pb.CreateOrderR
 		orderNo, req.UserId, req.ProductId, req.Count, totalAmount)
 
 	return &pb.CreateOrderResp{
-		OrderNo:   orderNo,
+		OrderNo:    orderNo,
 		ExpireTime: expireTime.Unix(),
 	}, nil
 }
 
 var (
-	ErrOrderNotFound        = errors.New("订单不存在")
+	ErrOrderNotFound         = errors.New("订单不存在")
 	ErrOrderAlreadyConfirmed = errors.New("订单已确认")
 )
 

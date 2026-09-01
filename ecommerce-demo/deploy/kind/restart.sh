@@ -27,7 +27,7 @@ echo "==========================================="
 # ==========================================
 log_step "1. 初始化基础设施配置..."
 kubectl apply -f "$SCRIPT_DIR/namespace.yaml"
-kubectl apply -f "$SCRIPT_DIR/secrets.yaml"
+"$SCRIPT_DIR/deploy-kind.sh" secrets
 log_info "namespace + secrets 就绪"
 
 # ==========================================

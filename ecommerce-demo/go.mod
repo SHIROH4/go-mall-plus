@@ -3,6 +3,7 @@ module ecommerce-demo
 go 1.25.6
 
 require (
+	github.com/alicebob/miniredis/v2 v2.37.0
 	github.com/bwmarrin/snowflake v0.3.0
 	github.com/go-playground/validator/v10 v10.30.2
 	github.com/golang-jwt/jwt/v4 v4.5.2
@@ -18,7 +19,6 @@ require (
 	google.golang.org/protobuf v1.36.11
 	gorm.io/driver/mysql v1.6.0
 	gorm.io/gorm v1.31.1
-	gorm.io/plugin/prometheus v0.1.0
 )
 
 require (
@@ -72,6 +72,7 @@ require (
 	github.com/stretchr/objx v0.5.2 // indirect
 	github.com/titanous/json5 v1.0.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
+	github.com/yuin/gopher-lua v1.1.1 // indirect
 	go.etcd.io/etcd/api/v3 v3.5.21 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.5.21 // indirect
 	go.etcd.io/etcd/client/v3 v3.5.21 // indirect

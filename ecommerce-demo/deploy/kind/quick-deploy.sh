@@ -19,20 +19,24 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
 log_info "Starting quick deployment..."
 
-# Step 1: Build
-log_info "Step 1/3: Building binaries and Docker images..."
+# Step 1: Create or reuse cluster before images are loaded into Kind
+log_info "Step 1/5: Creating or reusing Kind cluster..."
+"$SCRIPT_DIR/deploy-kind.sh" create
+
+# Step 2: Build
+log_info "Step 2/5: Building binaries and Docker images..."
 "$SCRIPT_DIR/build.sh" full
 
-# Step 2: Deploy infrastructure
-log_info "Step 2/3: Deploying infrastructure..."
+# Step 3: Deploy infrastructure
+log_info "Step 3/5: Deploying infrastructure..."
 "$SCRIPT_DIR/deploy-kind.sh" infra
 
-# Step 3: Initialize database
-log_info "Step 3/3: Initializing database..."
-"$SCRIPT_DIR/deploy-kind.sh" init_database || log_warn "Database init skipped or failed"
+# Step 4: Initialize or migrate database
+log_info "Step 4/5: Initializing database..."
+"$SCRIPT_DIR/deploy-kind.sh" init
 
-# Deploy services
-log_info "Deploying application services..."
+# Step 5: Deploy services
+log_info "Step 5/5: Deploying application services..."
 "$SCRIPT_DIR/deploy-kind.sh" services
 
 # Show status

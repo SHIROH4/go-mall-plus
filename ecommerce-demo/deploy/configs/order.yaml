@@ -27,6 +27,7 @@ StockRpcConf:
 Outbox:
   pollIntervalSeconds: 2
   batchSize: 50
+  claimTimeoutSeconds: 60
 
 RabbitMQ:
   Url: amqp://guest:guest@rabbitmq:5672/
@@ -43,6 +44,8 @@ MQConsumer:
   prefetchCount: 10
   maxRetryTimes: 3
   retryDelay: 5
+  retryExchangeName: order.retry.exchange
+  retryQueueName: order.retry.queue
   enableDLQ: true
   dlqExchangeName: order.dlx
   dlqQueueName: order.dlq

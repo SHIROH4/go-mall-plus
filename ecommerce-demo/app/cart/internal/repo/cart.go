@@ -8,8 +8,8 @@ import (
 )
 
 const (
-	MaxItemCount  = 99       // 单商品最大数量
-	MaxCartSize   = 50       // 单用户购物车最大商品数
+	MaxItemCount  = 99              // 单商品最大数量
+	MaxCartSize   = 50              // 单用户购物车最大商品数
 	CartExpire    = 720 * time.Hour // 购物车 30 天过期
 	CartKeyPrefix = "cart:"
 )

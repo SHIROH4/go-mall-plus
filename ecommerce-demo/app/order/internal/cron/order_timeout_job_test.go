@@ -1,14 +1,15 @@
 package cron
 
 import (
-    "testing"
-    "time"
+	"context"
+	"testing"
+	"time"
 
-    "ecommerce-demo/app/order/internal/config"
-    "ecommerce-demo/app/order/internal/repo"
+	"ecommerce-demo/app/order/internal/config"
+	"ecommerce-demo/app/order/internal/repo"
 
-    "github.com/stretchr/testify/assert"
-    "github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 )
 
 /*
@@ -22,92 +23,109 @@ import (
 
 // MockOrderRepo 用于测试的模拟仓储
 type MockOrderRepo struct {
-    mock.Mock
-    repo.OrderRepo
+	mock.Mock
+	repo.OrderRepo
+}
+
+func (m *MockOrderRepo) ListTimeoutOrders(ctx context.Context, limit int32) ([]*repo.Order, error) {
+	args := m.Called(ctx, limit)
+	orders, _ := args.Get(0).([]*repo.Order)
+	return orders, args.Error(1)
+}
+
+func (m *MockOrderRepo) TimeoutOrderTx(ctx context.Context, orderNo string) (bool, error) {
+	args := m.Called(ctx, orderNo)
+	return args.Bool(0), args.Error(1)
 }
 
 func TestOrderTimeoutJob_StartAndStop(t *testing.T) {
-    mockRepo := new(MockOrderRepo)
-    cfg := config.OrderTimeoutConfig{
-        OrderExpireMinutes:    1,
-        ScanIntervalSeconds:   1, // 测试用1秒
-        MaxScanCount:          10,
-    }
+	mockRepo := new(MockOrderRepo)
+	cfg := config.OrderTimeoutConfig{
+		OrderExpireMinutes:  1,
+		ScanIntervalSeconds: 1, // 测试用1秒
+		MaxScanCount:        10,
+	}
 
-    job := NewOrderTimeoutJob(mockRepo, cfg)
+	job := NewOrderTimeoutJob(mockRepo, cfg)
 
-    // 启动任务
-    job.Start()
-    time.Sleep(100 * time.Millisecond) // 等待任务启动
+	// 启动任务
+	job.Start()
+	time.Sleep(100 * time.Millisecond) // 等待任务启动
 
-    assert.True(t, job.isRunning, "任务应该处于运行状态")
+	assert.True(t, job.isRunning, "任务应该处于运行状态")
 
-    // 停止任务
-    job.Stop()
-    time.Sleep(100 * time.Millisecond) // 等待任务停止
+	// 停止任务
+	job.Stop()
+	time.Sleep(100 * time.Millisecond) // 等待任务停止
 
-    assert.False(t, job.isRunning, "任务应该已停止")
+	assert.False(t, job.isRunning, "任务应该已停止")
 }
 
 func TestOrderTimeoutJob_ScanInterval(t *testing.T) {
-    /*
-      测试扫描间隔配置
+	/*
+	   测试扫描间隔配置
 
-      场景：
-      1. 配置扫描间隔为 1 秒
-      2. 模拟两次扫描，验证间隔
-    */
-    // 此测试需要集成测试环境
-    t.Skip("跳过单元测试，需要集成测试环境")
+	   场景：
+	   1. 配置扫描间隔为 1 秒
+	   2. 模拟两次扫描，验证间隔
+	*/
+	// 此测试需要集成测试环境
+	t.Skip("跳过单元测试，需要集成测试环境")
 }
 
 func TestOrderTimeoutJob_BatchProcess(t *testing.T) {
-    /*
-      测试批量处理
+	mockRepo := new(MockOrderRepo)
+	cfg := config.OrderTimeoutConfig{MaxScanCount: 100}
+	job := NewOrderTimeoutJob(mockRepo, cfg)
+	orders := []*repo.Order{
+		{OrderNo: "order-winner", ProductID: 1, Count: 2},
+		{OrderNo: "order-already-handled", ProductID: 2, Count: 1},
+	}
 
-      场景：
-      1. 模拟 150 个超时订单
-      2. 配置每次最多处理 100 个
-      3. 验证分批处理
-    */
-    t.Skip("跳过单元测试，需要集成测试环境")
+	mockRepo.On("ListTimeoutOrders", mock.Anything, int32(100)).Return(orders, nil).Once()
+	mockRepo.On("TimeoutOrderTx", mock.Anything, "order-winner").Return(true, nil).Once()
+	mockRepo.On("TimeoutOrderTx", mock.Anything, "order-already-handled").Return(false, nil).Once()
+
+	job.scanAndProcess()
+
+	mockRepo.AssertExpectations(t)
 }
 
 func TestNewOrderTimeoutJob(t *testing.T) {
-    mockRepo := new(MockOrderRepo)
-    cfg := config.OrderTimeoutConfig{
-        OrderExpireMinutes:    30,
-        ScanIntervalSeconds:   60,
-        MaxScanCount:         100,
-    }
+	mockRepo := new(MockOrderRepo)
+	cfg := config.OrderTimeoutConfig{
+		OrderExpireMinutes:  30,
+		ScanIntervalSeconds: 60,
+		MaxScanCount:        100,
+	}
 
-    job := NewOrderTimeoutJob(mockRepo, cfg)
+	job := NewOrderTimeoutJob(mockRepo, cfg)
 
-    assert.NotNil(t, job)
-    assert.Equal(t, mockRepo, job.orderRepo)
-    assert.Equal(t, cfg, job.config)
-    assert.False(t, job.isRunning)
+	assert.NotNil(t, job)
+	assert.Equal(t, mockRepo, job.orderRepo)
+	assert.Equal(t, cfg, job.config)
+	assert.False(t, job.isRunning)
 }
 
 func TestOrderTimeoutJob_NotRunningTwice(t *testing.T) {
-    mockRepo := new(MockOrderRepo)
-    cfg := config.OrderTimeoutConfig{
-        ScanIntervalSeconds: 1,
-        MaxScanCount:       10,
-    }
+	mockRepo := new(MockOrderRepo)
+	cfg := config.OrderTimeoutConfig{
+		ScanIntervalSeconds: 1,
+		MaxScanCount:        10,
+	}
 
-    job := NewOrderTimeoutJob(mockRepo, cfg)
+	job := NewOrderTimeoutJob(mockRepo, cfg)
 
-    // 第一次启动
-    job.Start()
-    time.Sleep(50 * time.Millisecond)
+	// 第一次启动
+	job.Start()
+	time.Sleep(50 * time.Millisecond)
 
-    // 尝试第二次启动（应该被忽略）
-    job.Start()
-    time.Sleep(50 * time.Millisecond)
+	// 尝试第二次启动（应该被忽略）
+	job.Start()
+	time.Sleep(50 * time.Millisecond)
 
-    // 仍然应该处于运行状态
-    assert.True(t, job.isRunning)
+	// 仍然应该处于运行状态
+	assert.True(t, job.isRunning)
 
-    job.Stop()
+	job.Stop()
 }

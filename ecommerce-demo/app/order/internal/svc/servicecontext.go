@@ -45,7 +45,10 @@ func NewServiceContext(c config.Config) *ServiceContext {
 	orderRepo := mysql.NewOrderRepo(db, rdb)
 	outboxRepo := mysql.NewOutboxRepo(db)
 
-	producer := mq.NewRabbitProducer(c)
+	producer, err := mq.NewRabbitProducer(c)
+	if err != nil {
+		log.Fatalf("RabbitMQ 生产者初始化失败: %v", err)
+	}
 
 	orderService := service.NewOrderService(
 		orderRepo, outboxRepo, productRpc, stockRpc, producer, c.OrderTimeout,
@@ -62,7 +65,7 @@ func NewServiceContext(c config.Config) *ServiceContext {
 	}
 }
 
-// StartMQConsumer 启动 MQ 消费者
+// StartMQConsumer 启动订单创建事件的只读校验消费者。
 func (s *ServiceContext) StartMQConsumer() mq.Consumer {
 	consumer, err := mq.NewReliableConsumer(s.Config, s.OrderRepo, s.RDB)
 	if err != nil {

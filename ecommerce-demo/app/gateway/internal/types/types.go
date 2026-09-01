@@ -151,9 +151,9 @@ type ListProductByPageReq struct {
 
 type ListProductByPageResp struct {
 	Products []ProductItem `json:"products"`
-	Total    int32        `json:"total"`
-	Page     int32        `json:"page"`
-	PageSize int32        `json:"page_size"`
+	Total    int32         `json:"total"`
+	Page     int32         `json:"page"`
+	PageSize int32         `json:"page_size"`
 }
 
 // ============================================
@@ -349,19 +349,19 @@ type GetOrderDetailReq struct {
 }
 
 type GetOrderDetailResp struct {
-	Id            int64  `json:"id"`
-	OrderNo       string `json:"order_no"`
-	ProductId     int64  `json:"product_id"`
-	ProductName   string `json:"product_name"`
-	ProductDesc   string `json:"product_desc"`
-	ProductImage  string `json:"product_image"`
-	Count         int32  `json:"count"`
-	TotalAmount   int64  `json:"total_amount"`
-	Status        int32  `json:"status"`
-	StatusText    string `json:"status_text"`
-	CreateTime    int64  `json:"create_time"`
-	PayTime       int64  `json:"pay_time"`
-	ExpireTime    int64  `json:"expire_time"`
+	Id           int64  `json:"id"`
+	OrderNo      string `json:"order_no"`
+	ProductId    int64  `json:"product_id"`
+	ProductName  string `json:"product_name"`
+	ProductDesc  string `json:"product_desc"`
+	ProductImage string `json:"product_image"`
+	Count        int32  `json:"count"`
+	TotalAmount  int64  `json:"total_amount"`
+	Status       int32  `json:"status"`
+	StatusText   string `json:"status_text"`
+	CreateTime   int64  `json:"create_time"`
+	PayTime      int64  `json:"pay_time"`
+	ExpireTime   int64  `json:"expire_time"`
 }
 
 // 取消订单

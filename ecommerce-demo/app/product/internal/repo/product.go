@@ -23,10 +23,10 @@ func (Product) TableName() string {
 
 // Category 商品分类实体
 type Category struct {
-	ID        int64     `gorm:"column:id;primaryKey"`
-	Name      string    `gorm:"column:name"`
-	Icon      string    `gorm:"column:icon"`
-	Sort      int32     `gorm:"column:sort"`
+	ID         int64     `gorm:"column:id;primaryKey"`
+	Name       string    `gorm:"column:name"`
+	Icon       string    `gorm:"column:icon"`
+	Sort       int32     `gorm:"column:sort"`
 	CreateTime time.Time `gorm:"column:create_time;autoCreateTime"`
 	UpdateTime time.Time `gorm:"column:update_time;autoUpdateTime"`
 }
@@ -37,10 +37,10 @@ func (Category) TableName() string {
 
 // Stock 库存实体映射
 type Stock struct {
-	ID        int64     `gorm:"column:id;primaryKey"`
-	ProductID int64     `gorm:"column:product_id;uniqueIndex"`
-	StockNum  int32     `gorm:"column:stock_num"`
-	Version   int32     `gorm:"column:version"`
+	ID         int64     `gorm:"column:id;primaryKey"`
+	ProductID  int64     `gorm:"column:product_id;uniqueIndex"`
+	StockNum   int32     `gorm:"column:stock_num"`
+	Version    int32     `gorm:"column:version"`
 	CreateTime time.Time `gorm:"column:create_time;autoCreateTime"`
 	UpdateTime time.Time `gorm:"column:update_time;autoUpdateTime"`
 }

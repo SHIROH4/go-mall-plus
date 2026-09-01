@@ -1,11 +1,11 @@
 package svc
 
 import (
+	orderclient "ecommerce-demo/app/order/order"
 	"ecommerce-demo/app/payment/internal/config"
 	"ecommerce-demo/app/payment/internal/model"
 	"ecommerce-demo/app/payment/internal/repo/mysql"
 	"ecommerce-demo/app/payment/internal/service"
-	orderclient "ecommerce-demo/app/order/order"
 
 	gormMysql "gorm.io/driver/mysql"
 	"gorm.io/gorm"
