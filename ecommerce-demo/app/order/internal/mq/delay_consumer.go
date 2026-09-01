@@ -11,7 +11,6 @@ import (
 	"ecommerce-demo/app/order/internal/repo"
 	"ecommerce-demo/common/metrics"
 
-	"github.com/google/uuid"
 	amqp "github.com/rabbitmq/amqp091-go"
 	"github.com/redis/go-redis/v9"
 )
@@ -50,6 +49,7 @@ type DelayConsumer interface {
 type ReliableDelayConsumer struct {
 	conn      *amqp.Connection
 	channel   *amqp.Channel
+	retryPub  *confirmedPublisher
 	queueName string // order.timeout.check.queue
 	orderRepo repo.OrderRepo
 	rdb       *redis.ClusterClient
@@ -113,9 +113,36 @@ func NewReliableDelayConsumer(
 		}
 	}
 
+	retryExchangeName := cfg.MQConsumer.RetryExchangeName
+	if retryExchangeName == "" {
+		retryExchangeName = "order.retry.exchange"
+	}
+	retryQueueName := cfg.MQConsumer.RetryQueueName
+	if retryQueueName == "" {
+		retryQueueName = "order.retry.queue"
+	}
+	if err := declareRetryTopology(
+		ch,
+		retryExchangeName+".delay",
+		retryQueueName+".delay",
+		"delay.retry",
+		queueName,
+	); err != nil {
+		ch.Close()
+		conn.Close()
+		return nil, fmt.Errorf("声明延迟消息重试队列失败: %w", err)
+	}
+	retryPublisher, err := newConfirmedPublisher(ch)
+	if err != nil {
+		ch.Close()
+		conn.Close()
+		return nil, err
+	}
+
 	return &ReliableDelayConsumer{
 		conn:      conn,
 		channel:   ch,
+		retryPub:  retryPublisher,
 		queueName: queueName,
 		orderRepo: orderRepo,
 		rdb:       rdb,
@@ -268,7 +295,8 @@ func (c *ReliableDelayConsumer) processMessage(workerID int, d amqp.Delivery) {
 	if err := json.Unmarshal(d.Body, &msg); err != nil {
 		log.Printf("❌ [延迟Worker-%d] 消息解析失败: %v，MessageID=%s",
 			workerID, err, metadata.MessageID)
-		d.Ack(false) // 解析失败直接丢弃
+		metrics.MQConsumeTotal.WithLabelValues("order.delay.check", "dlq").Inc()
+		c.handleDeadLetter(workerID, d, msg, err, metadata, "delay.dlq")
 		return
 	}
 
@@ -277,6 +305,7 @@ func (c *ReliableDelayConsumer) processMessage(workerID int, d amqp.Delivery) {
 
 	// 3. 获取重试次数
 	retryCount := c.getRetryCount(d)
+	metadata.RetryCount = retryCount
 	maxRetries := c.config.MaxRetryTimes
 	if maxRetries <= 0 {
 		maxRetries = 3
@@ -300,36 +329,52 @@ func (c *ReliableDelayConsumer) processMessage(workerID int, d amqp.Delivery) {
 			workerID, msg.OrderNo, err, retryCount, maxRetries)
 
 		if retryCount >= maxRetries {
-			metrics.MQConsumeTotal.WithLabelValues("order.delay.check", "dql").Inc()
+			metrics.MQConsumeTotal.WithLabelValues("order.delay.check", "dlq").Inc()
 			c.handleDeadLetter(workerID, d, msg, err, metadata, "delay.dlq")
 		} else {
 			metrics.MQConsumeTotal.WithLabelValues("order.delay.check", "fail").Inc()
-			d.Nack(false, true)
+			if retryErr := c.publishRetry(ctx, d, metadata, retryCount+1); retryErr != nil {
+				log.Printf("❌ [延迟Worker-%d] 发布重试消息失败: OrderNo=%s，Err=%v", workerID, msg.OrderNo, retryErr)
+				d.Nack(false, true)
+			} else {
+				d.Ack(false)
+			}
 		}
 		return
 	}
 
-	// 6. 幂等检查：只有待支付订单才处理
-	if order.Status != 0 {
-		log.Printf("ℹ️ [延迟Worker-%d] 订单状态非待支付，跳过: OrderNo=%s，Status=%d",
+	// 6. 已超时订单仍进入仓储层，以便重试未完成的 Redis 库存补偿。
+	if repo.OrderStatus(order.Status) != repo.OrderStatusPending && repo.OrderStatus(order.Status) != repo.OrderStatusTimeout {
+		log.Printf("ℹ️ [延迟Worker-%d] 订单已支付或取消，跳过: OrderNo=%s，Status=%d",
 			workerID, msg.OrderNo, order.Status)
 		d.Ack(false)
 		return
 	}
 
 	// 7. 执行超时取消
-	err = c.orderRepo.TimeoutOrderTx(ctx, msg.OrderNo, msg.ProductID, msg.Count)
+	transitioned, err := c.orderRepo.TimeoutOrderTx(ctx, msg.OrderNo)
 	if err != nil {
 		log.Printf("❌ [延迟Worker-%d] 超时取消失败: OrderNo=%s，Err=%v，重试次数=%d/%d",
 			workerID, msg.OrderNo, err, retryCount, maxRetries)
 
 		if retryCount >= maxRetries {
-			metrics.MQConsumeTotal.WithLabelValues("order.delay.check", "dql").Inc()
+			metrics.MQConsumeTotal.WithLabelValues("order.delay.check", "dlq").Inc()
 			c.handleDeadLetter(workerID, d, msg, err, metadata, "delay.dlq")
 		} else {
 			metrics.MQConsumeTotal.WithLabelValues("order.delay.check", "fail").Inc()
-			d.Nack(false, true)
+			if retryErr := c.publishRetry(ctx, d, metadata, retryCount+1); retryErr != nil {
+				log.Printf("❌ [延迟Worker-%d] 发布重试消息失败: OrderNo=%s，Err=%v", workerID, msg.OrderNo, retryErr)
+				d.Nack(false, true)
+			} else {
+				d.Ack(false)
+			}
 		}
+		return
+	}
+	if !transitioned {
+		log.Printf("ℹ️ [延迟Worker-%d] 订单已被其他执行者处理，幂等跳过: OrderNo=%s",
+			workerID, msg.OrderNo)
+		d.Ack(false)
 		return
 	}
 
@@ -347,6 +392,11 @@ func (c *ReliableDelayConsumer) handleDeadLetter(workerID int, d amqp.Delivery, 
 		d.Ack(false)
 		return
 	}
+	if c.retryPub == nil {
+		log.Printf("❌ [延迟Worker-%d] DLQ Publisher 未初始化: OrderNo=%s", workerID, msg.OrderNo)
+		d.Nack(false, true)
+		return
+	}
 
 	dlxName := c.config.DLQExchangeName + ".delay"
 	dlqName := c.config.DLQQueueName + ".delay"
@@ -362,77 +412,68 @@ func (c *ReliableDelayConsumer) handleDeadLetter(workerID int, d amqp.Delivery, 
 
 	body, _ := json.Marshal(deadLetter)
 
-	err = c.channel.PublishWithContext(context.Background(),
-		dlxName,
-		routingKey,
-		false,
-		false,
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	err = c.retryPub.publish(ctx, dlxName, routingKey,
 		amqp.Publishing{
 			ContentType:  "application/json",
 			DeliveryMode: amqp.Persistent,
+			MessageId:    metadata.MessageID,
+			Timestamp:    time.Now(),
 			Body:         body,
-			Headers: amqp.Table{
-				"x-first-death-reason": "rejected",
-				"x-death-time":         time.Now().Unix(),
-				"x-original-queue":     c.queueName,
-			},
+			Headers:      retryHeaders(d, metadata.MessageID, metadata.TraceID, metadata.RetryCount, metadata.FirstTry),
 		})
 
 	if err != nil {
 		log.Printf("❌ [延迟Worker-%d] 发送死信失败: OrderNo=%s，Err=%v",
 			workerID, msg.OrderNo, err)
+		d.Nack(false, true)
 	} else {
 		log.Printf("☠️ [延迟Worker-%d] 消息已发送至死信队列: OrderNo=%s，DLQ=%s",
 			workerID, msg.OrderNo, dlqName)
+		d.Ack(false)
 	}
-
-	d.Ack(false)
 }
 
 // extractMetadata 提取元数据
 func (c *ReliableDelayConsumer) extractMetadata(d amqp.Delivery) DelayMessageMetadata {
+	messageID := deliveryMessageID(d, "")
 	metadata := DelayMessageMetadata{
-		MessageID:  uuid.New().String(),
-		TraceID:    uuid.New().String(),
-		RetryCount: 0,
-		FirstTry:   time.Now(),
+		MessageID:  messageID,
+		TraceID:    messageID,
+		RetryCount: deliveryRetryCount(d),
+		FirstTry:   deliveryFirstTry(d),
 	}
 
 	if d.Headers != nil {
-		if msgID, ok := d.Headers["x-message-id"].(string); ok {
-			metadata.MessageID = msgID
-		}
-		if retryCount, ok := d.Headers["x-retry-count"].(int32); ok {
-			metadata.RetryCount = int(retryCount)
+		if traceID, ok := d.Headers[headerTraceID].(string); ok && traceID != "" {
+			metadata.TraceID = traceID
 		}
 	}
-
-	if metadata.MessageID == "" {
-		metadata.MessageID = fmt.Sprintf("%d", d.DeliveryTag)
-	}
-
 	return metadata
 }
 
 // getRetryCount 获取重试次数
 func (c *ReliableDelayConsumer) getRetryCount(d amqp.Delivery) int {
-	if d.Headers == nil {
-		return 0
+	return deliveryRetryCount(d)
+}
+
+func (c *ReliableDelayConsumer) publishRetry(ctx context.Context, d amqp.Delivery, metadata DelayMessageMetadata, retryCount int) error {
+	if c.retryPub == nil {
+		return fmt.Errorf("retry publisher is not initialized")
+	}
+	retryExchangeName := c.config.RetryExchangeName
+	if retryExchangeName == "" {
+		retryExchangeName = "order.retry.exchange"
 	}
 
-	if xDeath, ok := d.Headers["x-death"].([]interface{}); ok && len(xDeath) > 0 {
-		for _, death := range xDeath {
-			if deathMap, ok := death.(amqp.Table); ok {
-				if count, ok := deathMap["count"].(int64); ok {
-					return int(count)
-				}
-			}
-		}
-	}
-
-	if retryCount, ok := d.Headers["x-retry-count"].(int32); ok {
-		return int(retryCount)
-	}
-
-	return 0
+	return c.retryPub.publish(ctx, retryExchangeName+".delay", "delay.retry", amqp.Publishing{
+		ContentType:  "application/json",
+		DeliveryMode: amqp.Persistent,
+		MessageId:    metadata.MessageID,
+		Timestamp:    time.Now(),
+		Body:         d.Body,
+		Expiration:   retryExpiration(c.config.RetryDelay, retryCount),
+		Headers:      retryHeaders(d, metadata.MessageID, metadata.TraceID, retryCount, metadata.FirstTry),
+	})
 }

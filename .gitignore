@@ -16,8 +16,7 @@ deploy/*/output/
 *.test
 *_test.exe
 
-# Go workspace
-*.sum
+# Go dependency checksums are source artifacts and must be committed.
 
 # Dependency directories
 vendor/
@@ -69,12 +68,6 @@ deploy/kind/cert/
 deploy/kind/context/cert/
 
 # ============================================
-# Generated Protocol Buffers
-# ============================================
-*.pb.go
-*.pb.gw.go
-
-# ============================================
 # Temporary Files
 # ============================================
 tmp/
@@ -87,10 +80,7 @@ tmp*/
 # ============================================
 .dockerignore
 
-# ============================================
-# Kind Cluster Config (local only)
-# ============================================
-kind-config.yaml
+# Kind kubeconfig remains local; the reproducible cluster definition is versioned.
 *.kubeconfig
 
 # ============================================

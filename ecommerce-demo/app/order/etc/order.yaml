@@ -33,6 +33,7 @@ StockRpcConf:
 Outbox:
   pollIntervalSeconds: 2
   batchSize: 50
+  claimTimeoutSeconds: 60
 
 # RabbitMQ 配置
 RabbitMQ:
@@ -60,6 +61,8 @@ MQConsumer:
   maxRetryTimes: 3
   # 重试间隔（秒）
   retryDelay: 5
+  retryExchangeName: order.retry.exchange
+  retryQueueName: order.retry.queue
   # 是否启用死信队列
   enableDLQ: true
   # 死信交换机名称

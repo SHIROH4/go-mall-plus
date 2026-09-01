@@ -11,8 +11,8 @@ import (
 
 	"ecommerce-demo/app/order/internal/config"
 
-	"github.com/zeromicro/go-zero/core/conf"
 	amqp "github.com/rabbitmq/amqp091-go"
+	"github.com/zeromicro/go-zero/core/conf"
 )
 
 /*
@@ -33,12 +33,12 @@ var configFile = flag.String("f", "etc/order.yaml", "the config file")
 
 // DLQMessage 死信消息结构
 type DLQMessage struct {
-    OriginalMessage map[string]interface{} `json:"originalMessage"`
-    Metadata       map[string]interface{} `json:"metadata"`
-    Error          string               `json:"error"`
-    FailedAt      string               `json:"failedAt"`
-    RetryCount    int                  `json:"retryCount"`
-    Source        string               `json:"source,omitempty"`
+	OriginalMessage map[string]interface{} `json:"originalMessage"`
+	Metadata        map[string]interface{} `json:"metadata"`
+	Error           string                 `json:"error"`
+	FailedAt        string                 `json:"failedAt"`
+	RetryCount      int                    `json:"retryCount"`
+	Source          string                 `json:"source,omitempty"`
 }
 
 func main() {
@@ -89,55 +89,55 @@ func main() {
 
 // consumeDLQ 消费指定死信队列
 func consumeDLQ(ch *amqp.Channel, queueName, source string) {
-    for {
-        // 先声明队列（幂等操作，队列已存在不影响）
-        _, err := ch.QueueDeclare(
-            queueName, // 队列名
-            true,      // durable
-            false,     // delete when unused
-            false,     // exclusive
-            false,     // no-wait
-            nil,       // arguments
-        )
-        if err != nil {
-            log.Printf("⚠️ 声明队列 %s 失败: %v，2秒后重试...", queueName, err)
-            time.Sleep(2 * time.Second)
-            continue
-        }
+	for {
+		// 先声明队列（幂等操作，队列已存在不影响）
+		_, err := ch.QueueDeclare(
+			queueName, // 队列名
+			true,      // durable
+			false,     // delete when unused
+			false,     // exclusive
+			false,     // no-wait
+			nil,       // arguments
+		)
+		if err != nil {
+			log.Printf("⚠️ 声明队列 %s 失败: %v，2秒后重试...", queueName, err)
+			time.Sleep(2 * time.Second)
+			continue
+		}
 
-        // 尝试消费
-        msgs, err := ch.Consume(queueName, "", false, false, false, false, nil)
-        if err != nil {
-            log.Printf("⚠️ 消费队列 %s 失败: %v，2秒后重试...", queueName, err)
-            time.Sleep(2 * time.Second)
-            continue
-        }
+		// 尝试消费
+		msgs, err := ch.Consume(queueName, "", false, false, false, false, nil)
+		if err != nil {
+			log.Printf("⚠️ 消费队列 %s 失败: %v，2秒后重试...", queueName, err)
+			time.Sleep(2 * time.Second)
+			continue
+		}
 
-        log.Printf("📬 开始消费死信队列: %s", queueName)
+		log.Printf("📬 开始消费死信队列: %s", queueName)
 
-        // 正常消费循环
-        for d := range msgs {
-            var msg DLQMessage
-            if err := json.Unmarshal(d.Body, &msg); err != nil {
-                log.Printf("❌ 解析死信消息失败: %v，Body: %s", err, string(d.Body))
-                d.Ack(false)
-                continue
-            }
+		// 正常消费循环
+		for d := range msgs {
+			var msg DLQMessage
+			if err := json.Unmarshal(d.Body, &msg); err != nil {
+				log.Printf("❌ 解析死信消息失败: %v，Body: %s", err, string(d.Body))
+				d.Ack(false)
+				continue
+			}
 
-            log.Printf("☠️ === 死信消息详情 ===")
-            log.Printf("来源: %s", source)
-            log.Printf("原始队列: %v", msg.Metadata)
-            log.Printf("错误信息: %s", msg.Error)
-            log.Printf("失败时间: %s", msg.FailedAt)
-            log.Printf("重试次数: %d", msg.RetryCount)
-            log.Printf("原始消息: %v", msg.OriginalMessage)
-            log.Printf("☠️ =====================")
+			log.Printf("☠️ === 死信消息详情 ===")
+			log.Printf("来源: %s", source)
+			log.Printf("原始队列: %v", msg.Metadata)
+			log.Printf("错误信息: %s", msg.Error)
+			log.Printf("失败时间: %s", msg.FailedAt)
+			log.Printf("重试次数: %d", msg.RetryCount)
+			log.Printf("原始消息: %v", msg.OriginalMessage)
+			log.Printf("☠️ =====================")
 
-            d.Ack(false)
-        }
+			d.Ack(false)
+		}
 
-        // 如果到达这里，说明 channel 被关闭了
-        log.Printf("⚠️ 队列 %s 的消费通道已关闭，2秒后重新连接...", queueName)
-        time.Sleep(2 * time.Second)
-    }
+		// 如果到达这里，说明 channel 被关闭了
+		log.Printf("⚠️ 队列 %s 的消费通道已关闭，2秒后重新连接...", queueName)
+		time.Sleep(2 * time.Second)
+	}
 }

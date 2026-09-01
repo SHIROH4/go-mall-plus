@@ -25,11 +25,11 @@ import (
 */
 
 type AuthMiddleware struct {
-	Config        config.Config
-	RDB           *redis.ClusterClient
-	publicKey     *rsa.PublicKey
-	privateKey    *rsa.PrivateKey
-	accessExpire  int64
+	Config         config.Config
+	RDB            *redis.ClusterClient
+	publicKey      *rsa.PublicKey
+	privateKey     *rsa.PrivateKey
+	accessExpire   int64
 	renewThreshold int64 // 续期阈值（秒），默认300秒
 }
 

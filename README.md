@@ -2,6 +2,31 @@
 
 基于 go-zero + Kind (K8s) 的微服务电商系统。
 
+## 核心工程链路
+
+```text
+创建订单
+  ├─ Stock RPC + Redis Lua 原子预扣
+  └─ MySQL 事务：扣减库存 + 写入订单 + 写入 Outbox
+                       │
+                       ▼
+             租约抢占式 Outbox Worker
+                       │ Publisher Confirm
+                       ▼
+                    RabbitMQ
+             ├─ 有界指数退避重试
+             ├─ 消费幂等 + 死信队列
+             └─ 延迟订单超时检查
+                       │
+                       ▼
+       MySQL 条件状态迁移 + Redis Lua 幂等库存补偿
+```
+
+- **Outbox 多副本安全：** Worker 使用唯一锁令牌和超时租约抢占消息，旧持有者不能覆盖新持有者的处理结果。
+- **MQ 可靠性：** 业务事件使用稳定 Event ID，重试和 DLQ 投递经 Publisher Confirm 确认后才 ACK 原消息。
+- **超时幂等：** 延迟消息与独立 Cron 可并发触发，只有条件更新的赢家回补 MySQL 库存；Redis 补偿以订单号去重并持久化完成状态。
+- **可观测性：** Prometheus 指标覆盖 HTTP/RPC、Outbox 与 MQ 处理结果，Grafana 提供运行时和业务看板。
+
 ## 技术栈
 
 | 层级 | 技术 |
@@ -33,12 +58,22 @@
 - Kind (`brew install kind`)
 - kubectl
 
+## 代码验证
+
+```bash
+cd ecommerce-demo
+go test -p 1 ./...
+go vet -p 1 ./...
+```
+
+GitHub Actions 会对每次 push 和 pull request 执行格式检查、全仓单元测试和静态分析。Proto 生成代码已纳入版本管理，可通过 `ecommerce-demo/scripts/generate_proto.sh` 重新生成。
+
 ## 首次部署
 
 ```bash
 cd ecommerce-demo/deploy/kind
 
-# 完整部署（创建 Kind 集群 + 构建镜像 + 部署所有服务）
+# 完整部署（创建/复用 Kind 集群、构建镜像、初始化/迁移数据库、部署服务）
 bash quick-deploy.sh
 ```
 
@@ -74,11 +109,11 @@ bash restart.sh
 ```
 
 脚本会自动：
-1. 部署 MySQL、RabbitMQ、Redis Cluster
-2. 组建 Redis Cluster 并验证
-3. 清理旧 MQ 消息
-4. 按依赖顺序启动所有微服务
-5. 健康检查（商品/购物车/下单）
+1. 创建或复用 Kind 集群
+2. 构建并加载全部服务镜像
+3. 部署 MySQL、RabbitMQ 和 3 主 3 从 Redis Cluster
+4. 初始化数据库并执行未应用的 SQL 迁移
+5. 启动微服务、订单 Worker、Prometheus 和 Grafana
 
 ### 彻底销毁
 

@@ -3,6 +3,7 @@ package mq
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log"
 	"strconv"
 	"sync"
@@ -39,6 +40,7 @@ import (
 */
 
 type OrderMsg struct {
+	EventID     string `json:"eventId"`
 	OrderNo     string `json:"orderNo"`
 	UserID      int64  `json:"userId"`
 	ProductID   int64  `json:"productId"`
@@ -57,9 +59,9 @@ type rabbitProducer struct {
 	url string
 	cfg config.Config
 
-	mu       sync.RWMutex
-	conn     *amqp.Connection
-	channel  *amqp.Channel
+	mu      sync.RWMutex
+	conn    *amqp.Connection
+	channel *amqp.Channel
 
 	// Publisher Confirm
 	confirms    chan amqp.Confirmation
@@ -77,7 +79,7 @@ type rabbitProducer struct {
 	closed  bool
 }
 
-func NewRabbitProducer(c config.Config) Producer {
+func NewRabbitProducer(c config.Config) (Producer, error) {
 	p := &rabbitProducer{
 		url:               c.RabbitMQ.Url,
 		cfg:               c,
@@ -90,13 +92,13 @@ func NewRabbitProducer(c config.Config) Producer {
 	}
 
 	if err := p.connect(); err != nil {
-		log.Fatalf("无法连接 RabbitMQ: %v", err)
+		return nil, fmt.Errorf("连接 RabbitMQ: %w", err)
 	}
 
 	// 启动后台重连监控
 	go p.monitorConnection()
 
-	return p
+	return p, nil
 }
 
 // connect 建立连接和通道，声明所有队列/交换机
@@ -226,6 +228,9 @@ func (p *rabbitProducer) monitorConnection() {
 
 // PublishOrder 发布订单创建消息（带 Publisher Confirm）
 func (p *rabbitProducer) PublishOrder(ctx context.Context, msg *OrderMsg) error {
+	if msg == nil || msg.EventID == "" {
+		return fmt.Errorf("order.created eventId is required")
+	}
 	body, err := json.Marshal(msg)
 	if err != nil {
 		return err
@@ -241,6 +246,7 @@ func (p *rabbitProducer) PublishOrder(ctx context.Context, msg *OrderMsg) error 
 		return amqp.ErrClosed
 	}
 
+	publishedAt := time.Now()
 	err = ch.PublishWithContext(ctx,
 		"",
 		p.queueName,
@@ -249,7 +255,14 @@ func (p *rabbitProducer) PublishOrder(ctx context.Context, msg *OrderMsg) error 
 		amqp.Publishing{
 			ContentType:  "application/json",
 			DeliveryMode: amqp.Persistent,
+			MessageId:    msg.EventID,
+			Timestamp:    publishedAt,
 			Body:         body,
+			Headers: amqp.Table{
+				"x-message-id":  msg.EventID,
+				"x-retry-count": int32(0),
+				"x-first-try":   publishedAt.UnixMilli(),
+			},
 		})
 	if err != nil {
 		return err
@@ -272,6 +285,9 @@ func (p *rabbitProducer) PublishOrder(ctx context.Context, msg *OrderMsg) error 
 
 // PublishDelayOrder 发布延迟超时检查消息（带 Publisher Confirm）
 func (p *rabbitProducer) PublishDelayOrder(ctx context.Context, msg *DelayOrderMsg, expireMinutes int) error {
+	if msg == nil || msg.EventID == "" {
+		return fmt.Errorf("order.delay.check eventId is required")
+	}
 	body, err := json.Marshal(msg)
 	if err != nil {
 		return err
@@ -289,6 +305,7 @@ func (p *rabbitProducer) PublishDelayOrder(ctx context.Context, msg *DelayOrderM
 		return amqp.ErrClosed
 	}
 
+	publishedAt := time.Now()
 	err = ch.PublishWithContext(ctx,
 		p.delayExchangeName,
 		p.delayRoutingKey,
@@ -297,8 +314,15 @@ func (p *rabbitProducer) PublishDelayOrder(ctx context.Context, msg *DelayOrderM
 		amqp.Publishing{
 			ContentType:  "application/json",
 			DeliveryMode: amqp.Persistent,
+			MessageId:    msg.EventID,
+			Timestamp:    publishedAt,
 			Body:         body,
 			Expiration:   expiration,
+			Headers: amqp.Table{
+				"x-message-id":  msg.EventID,
+				"x-retry-count": int32(0),
+				"x-first-try":   publishedAt.UnixMilli(),
+			},
 		})
 	if err != nil {
 		return err
