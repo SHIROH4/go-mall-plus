@@ -47,6 +47,8 @@ type OutboxRepo interface {
 	Insert(ctx context.Context, record *OutboxRecord) error
 	// InsertBatch 批量插入出站消息（在业务事务内调用）
 	InsertBatch(ctx context.Context, records []*OutboxRecord) error
+	// CountPendingMessages 返回当前待投递消息总数，用于积压监控。
+	CountPendingMessages(ctx context.Context) (int64, error)
 	// ClaimPendingMessages 原子抢占待发送消息；超时租约可由其他实例接管。
 	ClaimPendingMessages(ctx context.Context, limit int, leaseDuration time.Duration) ([]*OutboxRecord, error)
 	// MarkCompleted 标记消息为已发送

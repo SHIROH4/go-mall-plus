@@ -22,11 +22,16 @@ type fakeOutboxRepo struct {
 	failedID       int64
 	failedToken    string
 	failedMessage  string
+	pendingCount   int64
 }
 
 func (f *fakeOutboxRepo) Insert(context.Context, *repo.OutboxRecord) error { return nil }
 
 func (f *fakeOutboxRepo) InsertBatch(context.Context, []*repo.OutboxRecord) error { return nil }
+
+func (f *fakeOutboxRepo) CountPendingMessages(context.Context) (int64, error) {
+	return f.pendingCount, nil
+}
 
 func (f *fakeOutboxRepo) ClaimPendingMessages(_ context.Context, limit int, lease time.Duration) ([]*repo.OutboxRecord, error) {
 	f.claimLimit = limit

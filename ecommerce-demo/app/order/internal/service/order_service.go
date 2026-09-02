@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"ecommerce-demo/app/order/internal/config"
@@ -16,8 +16,8 @@ import (
 	stockclient "ecommerce-demo/app/stock/stock"
 	"ecommerce-demo/common/metrics"
 
-	"github.com/bwmarrin/snowflake"
 	"github.com/google/uuid"
+	"github.com/zeromicro/go-zero/core/logx"
 )
 
 var (
@@ -39,7 +39,6 @@ type orderServiceImpl struct {
 	productRpc    productclient.Product
 	stockRpc      stockclient.Stock
 	producer      mq.Producer
-	snowflakeNode *snowflake.Node
 	timeoutConfig config.OrderTimeoutConfig
 }
 
@@ -51,14 +50,12 @@ func NewOrderService(
 	producer mq.Producer,
 	timeoutConfig config.OrderTimeoutConfig,
 ) OrderService {
-	node, _ := snowflake.NewNode(1)
 	return &orderServiceImpl{
 		repo:          repo,
 		outboxRepo:    outboxRepo,
 		productRpc:    productRpc,
 		stockRpc:      stockRpc,
 		producer:      producer,
-		snowflakeNode: node,
 		timeoutConfig: timeoutConfig,
 	}
 }
@@ -110,12 +107,15 @@ func (s *orderServiceImpl) CreateOrder(ctx context.Context, req *pb.CreateOrderR
 	}
 
 	// 3. 生成订单号和过期时间
-	orderNo := fmt.Sprintf("ORD%d", s.snowflakeNode.Generate().Int64())
+	orderNo := newOrderNo()
 	expireMinutes := s.timeoutConfig.OrderExpireMinutes
 	if expireMinutes <= 0 {
 		expireMinutes = 30
 	}
-	expireTime := time.Now().Add(time.Duration(expireMinutes) * time.Minute)
+	// MySQL `datetime` stores whole seconds in the current schema. Normalize once
+	// before using the value in both the order row and the Outbox payload so the
+	// consumer's integrity check cannot see a one-second serialization mismatch.
+	expireTime := time.Now().Add(time.Duration(expireMinutes) * time.Minute).Truncate(time.Second)
 	totalAmount := prodResp.Product.Price * int64(req.Count)
 
 	// 4. 构建订单实体
@@ -170,6 +170,8 @@ func (s *orderServiceImpl) CreateOrder(ctx context.Context, req *pb.CreateOrderR
 	err = s.repo.CreateOrderWithOutboxTx(ctx, newOrder, expireTime, req.Count, outboxRecords)
 	if err != nil {
 		metrics.OrderCreateTotal.WithLabelValues("fail").Inc()
+		logx.Errorf("order transaction failed: order_no=%s user_id=%d product_id=%d count=%d err=%+v",
+			orderNo, req.UserId, req.ProductId, req.Count, err)
 		log.Printf("CreateOrderWithOutboxTx 失败，回滚Redis库存: OrderNo=%s, Err=%v", orderNo, err)
 		if _, rollbackErr := s.stockRpc.RollbackStock(ctx, &stockclient.RollbackStockReq{
 			ProductId: req.ProductId,
@@ -182,7 +184,6 @@ func (s *orderServiceImpl) CreateOrder(ctx context.Context, req *pb.CreateOrderR
 	}
 
 	metrics.OrderCreateTotal.WithLabelValues("success").Inc()
-	metrics.MQPublishTotal.WithLabelValues("outbox", "success").Add(2) // 两条outbox消息
 
 	log.Printf("订单创建成功: OrderNo=%s, UserID=%d, ProductID=%d, Count=%d, Amount=%d",
 		orderNo, req.UserId, req.ProductId, req.Count, totalAmount)
@@ -191,6 +192,13 @@ func (s *orderServiceImpl) CreateOrder(ctx context.Context, req *pb.CreateOrderR
 		OrderNo:    orderNo,
 		ExpireTime: expireTime.Unix(),
 	}, nil
+}
+
+// newOrderNo uses a random UUID rather than a process-local Snowflake node.
+// Order runs as multiple Deployment replicas; assigning every replica the same
+// Snowflake node ID can create duplicate order_no values in the same millisecond.
+func newOrderNo() string {
+	return "ORD" + strings.ReplaceAll(uuid.NewString(), "-", "")
 }
 
 var (

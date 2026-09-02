@@ -112,13 +112,18 @@ func (w *Worker) pollAndPublish() {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
+	pendingCount, err := w.outboxRepo.CountPendingMessages(ctx)
+	if err != nil {
+		log.Printf("Outbox Worker 统计待投递消息失败: %v", err)
+	} else {
+		metrics.OutboxPendingGauge.Set(float64(pendingCount))
+	}
+
 	records, err := w.outboxRepo.ClaimPendingMessages(ctx, w.batchSize, w.claimTimeout)
 	if err != nil {
 		log.Printf("Outbox Worker 拉取消息失败: %v", err)
 		return
 	}
-
-	metrics.OutboxPendingGauge.Set(float64(len(records)))
 
 	if len(records) == 0 {
 		return

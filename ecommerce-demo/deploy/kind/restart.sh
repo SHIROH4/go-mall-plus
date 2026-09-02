@@ -41,7 +41,7 @@ log_info "等待 MySQL..."
 kubectl wait --for=condition=ready pod -l app=mysql -n ecommerce --timeout=300s
 
 log_info "等待 RabbitMQ..."
-kubectl wait --for=condition=ready pod -l app=rabbitmq -n ecommerce --timeout=180s
+kubectl wait --for=condition=ready pod -l app=rabbitmq -n ecommerce --timeout=300s
 log_info "MySQL + RabbitMQ 就绪"
 
 # ==========================================

@@ -47,6 +47,15 @@ func (r *outboxRepoImpl) InsertBatch(ctx context.Context, records []*repo.Outbox
 	return r.db.WithContext(ctx).Create(&records).Error
 }
 
+func (r *outboxRepoImpl) CountPendingMessages(ctx context.Context) (int64, error) {
+	var count int64
+	err := r.db.WithContext(ctx).
+		Model(&repo.OutboxRecord{}).
+		Where("status = ?", repo.OutboxStatusPending).
+		Count(&count).Error
+	return count, err
+}
+
 // ClaimPendingMessages 使用条件更新原子抢占消息，避免多副本重复投递。
 // processing 消息超过租约后允许被其他 Worker 接管。
 func (r *outboxRepoImpl) ClaimPendingMessages(ctx context.Context, limit int, leaseDuration time.Duration) ([]*repo.OutboxRecord, error) {
@@ -119,11 +128,7 @@ func (r *outboxRepoImpl) MarkCompleted(ctx context.Context, id int64, lockToken 
 	result := r.db.WithContext(ctx).
 		Model(&repo.OutboxRecord{}).
 		Where("id = ? AND status = ? AND lock_token = ?", id, repo.OutboxStatusProcessing, lockToken).
-		Updates(map[string]interface{}{
-			"status":     repo.OutboxStatusCompleted,
-			"lock_token": "",
-			"locked_at":  nil,
-		})
+		Updates(completionUpdates())
 	if result.Error != nil {
 		return result.Error
 	}
@@ -131,6 +136,15 @@ func (r *outboxRepoImpl) MarkCompleted(ctx context.Context, id int64, lockToken 
 		return repo.ErrOutboxClaimLost
 	}
 	return nil
+}
+
+func completionUpdates() map[string]interface{} {
+	return map[string]interface{}{
+		"status":        repo.OutboxStatusCompleted,
+		"error_message": "",
+		"lock_token":    "",
+		"locked_at":     nil,
+	}
 }
 
 // MarkFailed 标记失败并计算下次重试时间（指数退避）

@@ -34,3 +34,12 @@ func TestFailureUpdatesLimitsStoredErrorMessage(t *testing.T) {
 
 	assert.Len(t, updates["error_message"], 200)
 }
+
+func TestCompletionUpdatesClearTransientFailureState(t *testing.T) {
+	updates := completionUpdates()
+
+	assert.Equal(t, repo.OutboxStatusCompleted, updates["status"])
+	assert.Equal(t, "", updates["error_message"])
+	assert.Equal(t, "", updates["lock_token"])
+	assert.Nil(t, updates["locked_at"])
+}
