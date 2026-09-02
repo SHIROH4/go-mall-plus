@@ -1,12 +1,15 @@
 #!/bin/bash
 # ============================================
-# 电商压测脚本 - 模拟真实业务场景
+# 电商业务烟雾脚本 - 串行模拟真实业务场景
 # ============================================
 set -e
 
 GATEWAY="${GATEWAY:-http://localhost:30088}"
 LOOPS="${LOOPS:-50}"
 SLEEP="${SLEEP:-0.5}"
+PRODUCT_MAX="${PRODUCT_MAX:-8}"
+
+command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 1; }
 
 # 颜色
 RED='\033[0;31m'
@@ -40,14 +43,13 @@ login() {
     resp=$(curl -s -X POST "$GATEWAY/api/user/login" \
         -H "Content-Type: application/json" \
         -d "{\"username\":\"$USERNAME\",\"password\":\"$PASSWORD\"}")
-    echo "   登录: $resp"
-    TOKEN=$(echo "$resp" | grep -o '"accessToken":"[^"]*"' | cut -d'"' -f4)
-    USER_ID=$(echo "$resp" | grep -o '"id":[0-9]*' | cut -d':' -f2)
+    TOKEN=$(echo "$resp" | jq -r '.data.accessToken // empty')
+    USER_ID=$(echo "$resp" | jq -r '.data.id // empty')
     if [ -z "$TOKEN" ]; then
         log_error "登录失败，无法获取 token"
         exit 1
     fi
-    log_info "   Token: ${TOKEN:0:20}..."
+    log_info "   Token 获取成功"
     log_info "   UserID: $USER_ID"
 }
 
@@ -56,7 +58,7 @@ list_products() {
     log_info "3. 获取商品列表"
     resp=$(curl -s "$GATEWAY/api/product/list" \
         -H "Content-Type: application/json")
-    product_count=$(echo "$resp" | grep -o '"id"' | wc -l | tr -d ' ')
+    product_count=$(echo "$resp" | jq -r '.data.products | length')
     log_info "   商品数: $product_count"
 }
 
@@ -70,7 +72,7 @@ get_categories() {
 
 # ---- 5. 商品详情 ----
 product_detail() {
-    local product_id=$(( (RANDOM % 10) + 1 ))
+    local product_id=$(( (RANDOM % PRODUCT_MAX) + 1 ))
     log_info "5. 商品详情 (ID=$product_id)"
     resp=$(curl -s "$GATEWAY/api/product/$product_id" \
         -H "Content-Type: application/json")
@@ -80,7 +82,7 @@ product_detail() {
 
 # ---- 6. 加入购物车 ----
 add_to_cart() {
-    local product_id=$(( (RANDOM % 10) + 1 ))
+    local product_id=$(( (RANDOM % PRODUCT_MAX) + 1 ))
     log_info "6. 加入购物车 (商品ID=$product_id)"
     resp=$(curl -s -X POST "$GATEWAY/api/cart/add" \
         -H "Content-Type: application/json" \
@@ -101,7 +103,7 @@ view_cart() {
 
 # ---- 8. 下单 ----
 create_order() {
-    local product_id=$(( (RANDOM % 10) + 1 ))
+    local product_id=$(( (RANDOM % PRODUCT_MAX) + 1 ))
     log_info "8. 下单 (商品ID=$product_id, 数量=${1:-1})"
     resp=$(curl -s -X POST "$GATEWAY/api/order/create" \
         -H "Content-Type: application/json" \
@@ -125,7 +127,7 @@ pay_order() {
     resp=$(curl -s "$GATEWAY/api/order/list?page=1&page_size=50" \
         -H "Content-Type: application/json" \
         -H "Authorization: Bearer $TOKEN")
-    order_no=$(echo "$resp" | grep -o '"orderNo":"[^"]*"' | head -1 | cut -d'"' -f4)
+    order_no=$(echo "$resp" | jq -r '.data.orders[]? | select(.status == 0) | .order_no' | head -1)
     if [ -z "$order_no" ]; then
         log_warn "   没有待支付订单"
         return
@@ -141,7 +143,7 @@ pay_order() {
 # ---- 主流程 ----
 main() {
     echo "==========================================="
-    echo "  电商压测脚本"
+    echo "  电商业务烟雾脚本"
     echo "  Gateway: $GATEWAY"
     echo "  循环次数: $LOOPS"
     echo "  间隔: ${SLEEP}s"
@@ -162,10 +164,10 @@ main() {
     product_detail
     sleep "$SLEEP"
 
-    # 压测循环
+    # 业务烟雾循环
     log_info ""
     log_info "==========================================="
-    log_info "  开始压测循环 ($LOOPS 轮)"
+    log_info "  开始业务烟雾循环 ($LOOPS 轮)"
     log_info "==========================================="
     log_info ""
 
@@ -199,7 +201,7 @@ main() {
         resp=$(curl -s -X POST "$GATEWAY/api/order/create" \
             -H "Content-Type: application/json" \
             -H "Authorization: Bearer $TOKEN" \
-            -d "{\"productId\":$(( (RANDOM % 10) + 1 )),\"count\":$qty}")
+            -d "{\"productId\":$(( (RANDOM % PRODUCT_MAX) + 1 )),\"count\":$qty}")
 
         if echo "$resp" | grep -q '"orderNo"'; then
             SUCCESS_ORDER=$((SUCCESS_ORDER + 1))
@@ -226,7 +228,7 @@ main() {
 
     echo ""
     log_info "==========================================="
-    log_info "  压测完成!"
+    log_info "  业务烟雾完成!"
     log_info "  下单成功: $SUCCESS_ORDER"
     log_info "  下单失败: $FAIL_ORDER"
     log_info "==========================================="

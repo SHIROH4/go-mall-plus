@@ -114,6 +114,7 @@ cd ecommerce-demo/deploy/kind
 
 ```bash
 ./build.sh full
+./build.sh load
 ```
 
 ### 3. 部署前端

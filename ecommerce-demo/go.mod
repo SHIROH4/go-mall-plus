@@ -4,7 +4,6 @@ go 1.25.6
 
 require (
 	github.com/alicebob/miniredis/v2 v2.37.0
-	github.com/bwmarrin/snowflake v0.3.0
 	github.com/go-playground/validator/v10 v10.30.2
 	github.com/golang-jwt/jwt/v4 v4.5.2
 	github.com/google/uuid v1.6.0

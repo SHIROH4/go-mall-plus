@@ -15,6 +15,9 @@ data:
       scrape_interval: 15s
       evaluation_interval: 15s
 
+    rule_files:
+      - /etc/prometheus/rules/*.yml
+
     scrape_configs:
       - job_name: 'gateway'
         static_configs:
@@ -87,6 +90,8 @@ spec:
           volumeMounts:
             - name: config
               mountPath: /etc/prometheus
+            - name: rules
+              mountPath: /etc/prometheus/rules
             - name: data
               mountPath: /prometheus
           resources:
@@ -100,6 +105,9 @@ spec:
         - name: config
           configMap:
             name: prometheus-config
+        - name: rules
+          configMap:
+            name: ecommerce-alert-rules
         - name: data
           emptyDir: {}
 ---

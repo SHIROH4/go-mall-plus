@@ -18,7 +18,7 @@ log_info()  { echo -e "${GREEN}[INFO]${NC} $1"; }
 log_warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
-KIND_CLUSTER_NAME="ecommerce-cluster"
+KIND_CLUSTER_NAME="${KIND_CLUSTER_NAME:-ecommerce-cluster}"
 
 # =============================================================================
 # Check prerequisites
@@ -45,7 +45,7 @@ create_cluster() {
         return 0
     fi
 
-    kind create cluster --config "$KIND_DIR/kind-config.yaml" --wait 5m
+    kind create cluster --name "$KIND_CLUSTER_NAME" --config "$KIND_DIR/kind-config.yaml" --wait 5m
 
     log_info "Kind cluster created successfully!"
 }
@@ -85,7 +85,7 @@ deploy_infrastructure() {
 
     log_info "Deploying RabbitMQ..."
     kubectl apply -f "$KIND_DIR/rabbitmq.yaml"
-    kubectl rollout status deployment/rabbitmq -n ecommerce --timeout=180s
+    kubectl rollout status deployment/rabbitmq -n ecommerce --timeout=300s
 
     log_info "Waiting for infrastructure to be ready..."
     sleep 10
@@ -205,9 +205,17 @@ deploy_services() {
     done
 
     log_info "Deploying Prometheus and Grafana..."
-    kubectl apply -f "$KIND_DIR/services/prometheus.yaml"
     kubectl apply -f "$KIND_DIR/services/alerting-rules.yaml"
+    kubectl apply -f "$KIND_DIR/services/prometheus.yaml"
     kubectl apply -f "$KIND_DIR/services/grafana.yaml"
+
+    # Kind uses locally loaded `latest` images with imagePullPolicy=Never.
+    # Applying an unchanged Deployment does not recreate Pods, so explicitly
+    # restart them to pick up images most recently loaded into containerd.
+    log_info "Restarting application deployments to pick up locally loaded images..."
+    for svc in gateway user product cart order payment address stock order-delay order-cron order-dlq; do
+        kubectl rollout restart "deployment/$svc" -n ecommerce
+    done
 
     log_info "Waiting for deployments to be ready..."
     for svc in gateway user product cart order payment address stock order-delay order-cron order-dlq; do
@@ -233,7 +241,7 @@ status() {
     echo -e "${BLUE}===============================================${NC}"
     echo -e "${BLUE}  Application Services${NC}"
     echo -e "${BLUE}===============================================${NC}"
-    kubectl get pods -n ecommerce -l 'app in (gateway,user,product,cart,order,payment,address,order-delay,order-cron,order-dlq)'
+    kubectl get pods -n ecommerce -l 'app in (gateway,user,product,cart,order,payment,address,stock,order-delay,order-cron,order-dlq)'
     echo ""
     echo -e "${BLUE}===============================================${NC}"
     echo -e "${BLUE}  Services${NC}"
@@ -241,7 +249,8 @@ status() {
     kubectl get svc -n ecommerce
     echo ""
     echo -e "${GREEN}Gateway:   http://localhost:30088${NC}"
-    echo -e "${GREEN}Frontend:  http://localhost:30080${NC}"
+    echo -e "${GREEN}Prometheus:http://localhost:30909${NC}"
+    echo -e "${GREEN}Grafana:   http://localhost:30300${NC}"
     echo -e "${GREEN}RabbitMQ:  http://localhost:31672${NC}"
 }
 

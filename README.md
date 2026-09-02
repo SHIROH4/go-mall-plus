@@ -24,6 +24,7 @@
 
 - **Outbox 多副本安全：** Worker 使用唯一锁令牌和超时租约抢占消息，旧持有者不能覆盖新持有者的处理结果。
 - **MQ 可靠性：** 业务事件使用稳定 Event ID，重试和 DLQ 投递经 Publisher Confirm 确认后才 ACK 原消息。
+- **多副本订单号：** 使用 `ORD + UUID` 生成业务订单号，避免多个 Deployment 副本共享 Snowflake 节点号导致的碰撞；数据库唯一索引继续作为最终兜底。
 - **超时幂等：** 延迟消息与独立 Cron 可并发触发，只有条件更新的赢家回补 MySQL 库存；Redis 补偿以订单号去重并持久化完成状态。
 - **可观测性：** Prometheus 指标覆盖 HTTP/RPC、Outbox 与 MQ 处理结果，Grafana 提供运行时和业务看板。
 
@@ -77,9 +78,19 @@ cd ecommerce-demo/deploy/kind
 bash quick-deploy.sh
 ```
 
+脚本默认使用 `ecommerce-cluster`。需要隔离本地环境时，可指定集群和独立 BuildKit 构建器（同一时刻只能有一个集群占用下列 NodePort）：
+
+```bash
+docker buildx create --name go-mall-plus-builder --driver docker-container --bootstrap
+KIND_CLUSTER_NAME=ecommerce-clean \
+GO_MALL_DOCKER_BUILDER=go-mall-plus-builder \
+bash quick-deploy.sh
+```
+
 访问地址：
 - 前端：http://localhost:3000 （需 `cd ecommerce-demo/frontend && python3 -m http.server 3000`）
 - API 网关：http://localhost:30088
+- Prometheus：http://localhost:30909
 - Grafana：http://localhost:30300 (admin/admin)
 - RabbitMQ：http://localhost:31672 (guest/guest)
 
@@ -122,12 +133,32 @@ cd ecommerce-demo/deploy/kind
 ./deploy-kind.sh clean
 ```
 
-## 压测
+## 业务烟雾与性能基线
 
 ```bash
 cd ecommerce-demo/scripts
 GATEWAY=http://localhost:30088 LOOPS=100 bash load_test.sh
 ```
+
+脚本用于业务烟雾循环，不应把循环次数当作并发或 QPS。可复现的 `wrk` 只读基线及实验环境见 [docs/benchmarks/2026-09-02-kind-baseline.md](docs/benchmarks/2026-09-02-kind-baseline.md)；面试用的完整操作、故障注入和压测复盘见 [docs/interview/reliability-and-benchmark-playbook.md](docs/interview/reliability-and-benchmark-playbook.md)。
+
+购物车写链路的并发基准不会消耗商品库存，可按阶梯提高连接数：
+
+```bash
+THREADS=4 CONNECTIONS=8 DURATION=20s \
+  bash ecommerce-demo/scripts/run_cart_write_benchmark.sh
+```
+
+订单压测使用独立商品和测试账号。默认 Gateway 会保护公开下单接口；仅在隔离 Kind 环境可临时应用 `gateway-benchmark-config.yaml`，结束后必须切回默认配置。完整的配置切换、恢复与验收步骤见 [压测复盘手册](docs/interview/reliability-and-benchmark-playbook.md)：
+
+```bash
+# 准备数据；完成配置切换并等待 Gateway 稳定后再执行
+bash ecommerce-demo/scripts/prepare_order_benchmark_data.sh
+go run ecommerce-demo/scripts/order_write_benchmark.go \
+  -requests=500 -concurrency=8 -rate=0
+```
+
+本地 Apple M4 / Kind 双副本环境的可复现订单写基线为：500 请求、8 并发，100% 成功，544.58 req/s，P99 22.06ms；停止请求后 Outbox 积压最终归零。此结果是本地功能与性能基线，不代表生产容量。
 
 ## 项目结构
 

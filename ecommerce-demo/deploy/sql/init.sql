@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS `stock` (
 -- ----------------------------
 CREATE TABLE IF NOT EXISTS `order` (
     `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
-    `order_no` varchar(64) NOT NULL DEFAULT '' COMMENT '业务订单号(雪花算法)',
+    `order_no` varchar(64) NOT NULL DEFAULT '' COMMENT '业务订单号(UUID)',
     `user_id` bigint(20) unsigned NOT NULL DEFAULT '0' COMMENT '用户ID',
     `product_id` bigint(20) unsigned NOT NULL DEFAULT '0' COMMENT '商品ID',
     `count` int(11) NOT NULL DEFAULT '0' COMMENT '购买数量',

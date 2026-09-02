@@ -281,8 +281,6 @@ spec:
               mountPath: /etc/grafana/provisioning/dashboards
             - name: dashboards
               mountPath: /var/lib/grafana/dashboards
-            - name: dashboards-runtime
-              mountPath: /var/lib/grafana/dashboards
           resources:
             requests:
               cpu: 50m
@@ -298,14 +296,15 @@ spec:
           configMap:
             name: grafana-dashboards
         - name: dashboards
-          configMap:
-            name: grafana-dashboard-business
-            items:
-              - key: business-metrics.json
-                path: business-metrics.json
-        - name: dashboards-runtime
-          configMap:
-            name: grafana-dashboard-go-runtime
-            items:
-              - key: go-runtime.json
-                path: go-runtime.json
+          projected:
+            sources:
+              - configMap:
+                  name: grafana-dashboard-business
+                  items:
+                    - key: business-metrics.json
+                      path: business-metrics.json
+              - configMap:
+                  name: grafana-dashboard-go-runtime
+                  items:
+                    - key: go-runtime.json
+                      path: go-runtime.json
