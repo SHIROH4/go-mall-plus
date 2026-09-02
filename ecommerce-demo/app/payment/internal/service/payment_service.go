@@ -111,8 +111,8 @@ func (s *paymentServiceImpl) CreatePay(ctx context.Context, req *pb.CreatePayReq
 
 	if err := s.repo.Create(ctx, payment); err != nil {
 		return nil, err
-		metrics.PaymentTotal.WithLabelValues("pending", req.PayChannel).Inc()
 	}
+	metrics.PaymentTotal.WithLabelValues("pending", req.PayChannel).Inc()
 
 	// 5. 生成模拟二维码（实际应调用第三方支付SDK）
 	qrCode := generateQrCode(paymentNo)

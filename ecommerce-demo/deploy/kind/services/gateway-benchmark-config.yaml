@@ -1,0 +1,91 @@
+# Benchmark-only Gateway configuration. Apply only in a disposable Kind cluster.
+# It deliberately raises order admission limits; production/default traffic must use gateway.yaml.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gateway-benchmark-config
+  namespace: ecommerce
+data:
+  gateway.yaml: |
+    Name: gateway
+    Host: 0.0.0.0
+    Port: 8888
+    Auth:
+      PrivateKeyPath: "/etc/jwt/private.pem"
+      PublicKeyPath: "/etc/jwt/public.pem"
+      AccessExpire: 7200
+      RefreshExpire: 604800
+    RateLimit:
+      Enabled: true
+      Global:
+        Rate: 1000
+        Burst: 2000
+      PerIP:
+        Rate: 1000
+        Burst: 2000
+      Routes:
+        "/api/order/create":
+          Rate: 1000
+          Burst: 2000
+        "/api/user/login":
+          Rate: 3
+          Burst: 5
+        "/api/user/register":
+          Rate: 2
+          Burst: 5
+    CORS:
+      Enabled: true
+      AllowedOrigins:
+        - "*"
+      AllowedMethods:
+        - GET
+        - POST
+        - PUT
+        - DELETE
+        - OPTIONS
+      AllowedHeaders:
+        - Content-Type
+        - Authorization
+        - X-Requested-With
+      MaxAge: 3600
+    CircuitBreaker:
+      Enabled: true
+      Threshold: 50
+    RedisConf:
+      Host: redis-cluster:6379
+      Type: node
+      Pass: "redis123456"
+      DB: 0
+    MysqlConf:
+      Host: mysql-write:3306
+      User: root
+      Password: root123456
+      Database: ecommerce_demo
+    UserRpcConf:
+      Endpoints:
+        - user.ecommerce.svc.cluster.local:8080
+      Timeout: 3000
+    ProductRpcConf:
+      Endpoints:
+        - product.ecommerce.svc.cluster.local:8081
+      Timeout: 3000
+    OrderRpcConf:
+      Endpoints:
+        - order.ecommerce.svc.cluster.local:8082
+      Timeout: 5000
+    StockRpcConf:
+      Endpoints:
+        - stock.ecommerce.svc.cluster.local:8086
+      Timeout: 3000
+    CartRpcConf:
+      Endpoints:
+        - cart.ecommerce.svc.cluster.local:8083
+      Timeout: 3000
+    PaymentRpcConf:
+      Endpoints:
+        - payment.ecommerce.svc.cluster.local:8084
+      Timeout: 5000
+    AddressRpcConf:
+      Endpoints:
+        - address.ecommerce.svc.cluster.local:8085
+      Timeout: 3000

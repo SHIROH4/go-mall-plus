@@ -215,8 +215,8 @@ func (r *productRepoImpl) UpdateProduct(ctx context.Context, p *repo.Product) er
 	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		// 更新商品信息
 		if err := tx.Model(&repo.Product{}).Where("id = ?", p.ID).Updates(map[string]interface{}{
-			"name": p.Name,
-			"desc": p.Desc,
+			"name":  p.Name,
+			"desc":  p.Desc,
 			"price": p.Price,
 		}).Error; err != nil {
 			return err

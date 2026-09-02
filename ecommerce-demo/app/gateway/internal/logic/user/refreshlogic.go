@@ -28,15 +28,15 @@ func NewRefreshLogic(ctx context.Context, svcCtx *svc.ServiceContext) *RefreshLo
 }
 
 /*
-  Refresh 刷新Token（防重放加固版）
+Refresh 刷新Token（防重放加固版）
 
-  安全改进：
-  1. 分布式锁防并发刷新：同一用户同时只能有一个刷新请求
-  2. 已使用Token标记：刷新后旧RefreshToken立即标记为已使用，防止重放
-  3. 原子操作顺序：先标记旧Token→再签发新Token→再存储新JTI
-     （即使中间步骤失败，旧Token也已失效，不会造成安全漏洞）
+安全改进：
+ 1. 分布式锁防并发刷新：同一用户同时只能有一个刷新请求
+ 2. 已使用Token标记：刷新后旧RefreshToken立即标记为已使用，防止重放
+ 3. 原子操作顺序：先标记旧Token→再签发新Token→再存储新JTI
+    （即使中间步骤失败，旧Token也已失效，不会造成安全漏洞）
 
-  并发安全说明：
+并发安全说明：
   - 攻击者同时发送2个请求用同一RefreshToken刷新：
     请求A获取锁→标记旧Token→签发新Token→释放锁
     请求B获取锁→发现旧Token已标记→返回错误

@@ -65,19 +65,21 @@ CREATE TABLE IF NOT EXISTS `stock` (
 -- ----------------------------
 CREATE TABLE IF NOT EXISTS `order` (
     `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
-    `order_no` varchar(64) NOT NULL DEFAULT '' COMMENT '业务订单号(雪花算法)',
+    `order_no` varchar(64) NOT NULL DEFAULT '' COMMENT '业务订单号(UUID)',
     `user_id` bigint(20) unsigned NOT NULL DEFAULT '0' COMMENT '用户ID',
     `product_id` bigint(20) unsigned NOT NULL DEFAULT '0' COMMENT '商品ID',
     `count` int(11) NOT NULL DEFAULT '0' COMMENT '购买数量',
     `total_amount` int(11) NOT NULL DEFAULT '0' COMMENT '总金额(单位:分)',
     `status` tinyint(3) NOT NULL DEFAULT '0' COMMENT '订单状态: 0待支付 1已支付 2已取消 3已超时',
     `expire_time` datetime DEFAULT NULL COMMENT '订单超时时间',
+    `stock_cache_restored` tinyint(1) NOT NULL DEFAULT '0' COMMENT '超时订单的Redis库存是否已补偿',
     `create_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `update_time` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
     UNIQUE KEY `idx_order_no` (`order_no`),
     KEY `idx_user_id` (`user_id`),
-    KEY `idx_status_expire` (`status`, `expire_time`)
+    KEY `idx_status_expire` (`status`, `expire_time`),
+    KEY `idx_timeout_compensation` (`status`, `stock_cache_restored`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='订单表';
 
 -- ----------------------------
@@ -130,11 +132,13 @@ CREATE TABLE IF NOT EXISTS `outbox` (
     `id` bigint(20) unsigned NOT NULL AUTO_INCREMENT,
     `message_type` varchar(64) NOT NULL DEFAULT '' COMMENT '消息类型: order.created / order.delay.check',
     `payload` text NOT NULL COMMENT '消息体 JSON',
-    `status` tinyint(3) NOT NULL DEFAULT '0' COMMENT '状态: 0待发送 1发送中 2已发送',
+    `status` tinyint(3) NOT NULL DEFAULT '0' COMMENT '状态: 0待发送 1发送中 2已发送 3最终失败',
     `retry_count` int(11) NOT NULL DEFAULT '0' COMMENT '已重试次数',
     `max_retries` int(11) NOT NULL DEFAULT '5' COMMENT '最大重试次数',
     `next_retry_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT '下次重试时间',
     `error_message` varchar(200) DEFAULT '' COMMENT '最后一次错误信息',
+    `lock_token` varchar(64) NOT NULL DEFAULT '' COMMENT 'Worker 抢占令牌',
+    `locked_at` datetime DEFAULT NULL COMMENT 'Worker 抢占时间',
     `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),

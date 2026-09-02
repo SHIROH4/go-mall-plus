@@ -33,8 +33,8 @@ func main() {
 
 	// 注册 /metrics 端点
 	server.AddRoute(rest.Route{
-		Method:  http.MethodGet,
-		Path:    "/metrics",
+		Method: http.MethodGet,
+		Path:   "/metrics",
 		Handler: func(w http.ResponseWriter, r *http.Request) {
 			promhttp.Handler().ServeHTTP(w, r)
 		},

@@ -154,9 +154,9 @@ func (s *cartServiceImpl) GetSelectedCart(ctx context.Context, req *pb.GetSelect
 
 	if len(items) == 0 {
 		return &pb.GetSelectedCartResp{
-			Items:          []*pb.CartItem{},
-			SelectedCount:  0,
-			TotalAmount:    0,
+			Items:         []*pb.CartItem{},
+			SelectedCount: 0,
+			TotalAmount:   0,
 		}, nil
 	}
 

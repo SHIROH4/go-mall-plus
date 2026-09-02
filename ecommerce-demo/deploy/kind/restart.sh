@@ -27,7 +27,7 @@ echo "==========================================="
 # ==========================================
 log_step "1. 初始化基础设施配置..."
 kubectl apply -f "$SCRIPT_DIR/namespace.yaml"
-kubectl apply -f "$SCRIPT_DIR/secrets.yaml"
+"$SCRIPT_DIR/deploy-kind.sh" secrets
 log_info "namespace + secrets 就绪"
 
 # ==========================================
@@ -41,7 +41,7 @@ log_info "等待 MySQL..."
 kubectl wait --for=condition=ready pod -l app=mysql -n ecommerce --timeout=300s
 
 log_info "等待 RabbitMQ..."
-kubectl wait --for=condition=ready pod -l app=rabbitmq -n ecommerce --timeout=180s
+kubectl wait --for=condition=ready pod -l app=rabbitmq -n ecommerce --timeout=300s
 log_info "MySQL + RabbitMQ 就绪"
 
 # ==========================================

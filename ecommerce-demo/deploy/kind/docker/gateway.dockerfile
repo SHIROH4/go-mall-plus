@@ -9,7 +9,6 @@ WORKDIR /app
 
 COPY gateway ./gateway
 COPY etc ./etc
-COPY cert ./cert
 
 EXPOSE 8888
 

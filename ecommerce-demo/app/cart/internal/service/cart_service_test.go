@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"ecommerce-demo/app/cart/internal/repo"
-	"ecommerce-demo/app/cart/internal/service"
 	"ecommerce-demo/app/cart/pb"
 )
 
@@ -112,7 +111,7 @@ func (m *mockCartRepo) ItemKey(productId int64) string {
 
 func TestAddCart(t *testing.T) {
 	repo := newMockCartRepo()
-	svc := service.NewCartService(repo)
+	svc := NewCartService(repo)
 
 	ctx := context.Background()
 	req := &pb.AddCartReq{
@@ -140,7 +139,7 @@ func TestAddCart(t *testing.T) {
 
 func TestAddCart_ItemExists(t *testing.T) {
 	repo := newMockCartRepo()
-	svc := service.NewCartService(repo)
+	svc := NewCartService(repo)
 
 	ctx := context.Background()
 
@@ -179,7 +178,7 @@ func TestAddCart_ItemExists(t *testing.T) {
 
 func TestGetCart(t *testing.T) {
 	repo := newMockCartRepo()
-	svc := service.NewCartService(repo)
+	svc := NewCartService(repo)
 
 	ctx := context.Background()
 
@@ -187,14 +186,14 @@ func TestGetCart(t *testing.T) {
 	svc.AddCart(ctx, &pb.AddCartReq{
 		UserId:    1001,
 		ProductId: 2001,
-		Price:    100,
-		Count:    2,
+		Price:     100,
+		Count:     2,
 	})
 	svc.AddCart(ctx, &pb.AddCartReq{
 		UserId:    1001,
 		ProductId: 2002,
-		Price:    200,
-		Count:    1,
+		Price:     200,
+		Count:     1,
 	})
 
 	// 获取购物车
@@ -215,7 +214,7 @@ func TestGetCart(t *testing.T) {
 
 func TestUpdateCart(t *testing.T) {
 	repo := newMockCartRepo()
-	svc := service.NewCartService(repo)
+	svc := NewCartService(repo)
 
 	ctx := context.Background()
 
@@ -244,7 +243,7 @@ func TestUpdateCart(t *testing.T) {
 
 func TestRemoveCart(t *testing.T) {
 	repo := newMockCartRepo()
-	svc := service.NewCartService(repo)
+	svc := NewCartService(repo)
 
 	ctx := context.Background()
 
@@ -272,7 +271,7 @@ func TestRemoveCart(t *testing.T) {
 
 func TestClearCart(t *testing.T) {
 	repo := newMockCartRepo()
-	svc := service.NewCartService(repo)
+	svc := NewCartService(repo)
 
 	ctx := context.Background()
 
@@ -303,7 +302,7 @@ func TestClearCart(t *testing.T) {
 
 func TestSelectCart(t *testing.T) {
 	repo := newMockCartRepo()
-	svc := service.NewCartService(repo)
+	svc := NewCartService(repo)
 
 	ctx := context.Background()
 
@@ -333,7 +332,7 @@ func TestSelectCart(t *testing.T) {
 
 func TestGetSelectedCart(t *testing.T) {
 	repo := newMockCartRepo()
-	svc := service.NewCartService(repo)
+	svc := NewCartService(repo)
 
 	ctx := context.Background()
 
@@ -341,13 +340,13 @@ func TestGetSelectedCart(t *testing.T) {
 	svc.AddCart(ctx, &pb.AddCartReq{
 		UserId:    1001,
 		ProductId: 2001,
-		Price:    100,
+		Price:     100,
 		Count:     2,
 	})
 	svc.AddCart(ctx, &pb.AddCartReq{
 		UserId:    1001,
 		ProductId: 2002,
-		Price:    200,
+		Price:     200,
 		Count:     1,
 	})
 
@@ -375,8 +374,8 @@ func TestGetSelectedCart(t *testing.T) {
 }
 
 func TestCartFull(t *testing.T) {
-	repo := newMockCartRepo()
-	svc := service.NewCartService(repo)
+	repoMock := newMockCartRepo()
+	svc := NewCartService(repoMock)
 
 	ctx := context.Background()
 
@@ -398,14 +397,14 @@ func TestCartFull(t *testing.T) {
 		ProductId: 4000,
 		Count:     1,
 	})
-	if err != service.ErrCartFull {
+	if err != ErrCartFull {
 		t.Errorf("Expected ErrCartFull, got %v", err)
 	}
 }
 
 func TestUpdateCountToZero(t *testing.T) {
 	repo := newMockCartRepo()
-	svc := service.NewCartService(repo)
+	svc := NewCartService(repo)
 
 	ctx := context.Background()
 

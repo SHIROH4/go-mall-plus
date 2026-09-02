@@ -4,19 +4,20 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"ecommerce-demo/app/order/internal/config"
 	"ecommerce-demo/app/order/internal/mq"
 	"ecommerce-demo/app/order/internal/repo"
 	"ecommerce-demo/app/order/pb"
-	"ecommerce-demo/common/metrics"
 	productclient "ecommerce-demo/app/product/product"
 	stockclient "ecommerce-demo/app/stock/stock"
+	"ecommerce-demo/common/metrics"
 
-	"github.com/bwmarrin/snowflake"
+	"github.com/google/uuid"
+	"github.com/zeromicro/go-zero/core/logx"
 )
 
 var (
@@ -38,7 +39,6 @@ type orderServiceImpl struct {
 	productRpc    productclient.Product
 	stockRpc      stockclient.Stock
 	producer      mq.Producer
-	snowflakeNode *snowflake.Node
 	timeoutConfig config.OrderTimeoutConfig
 }
 
@@ -50,35 +50,33 @@ func NewOrderService(
 	producer mq.Producer,
 	timeoutConfig config.OrderTimeoutConfig,
 ) OrderService {
-	node, _ := snowflake.NewNode(1)
 	return &orderServiceImpl{
 		repo:          repo,
 		outboxRepo:    outboxRepo,
 		productRpc:    productRpc,
 		stockRpc:      stockRpc,
 		producer:      producer,
-		snowflakeNode: node,
 		timeoutConfig: timeoutConfig,
 	}
 }
 
 /*
-  CreateOrder 创建订单（重构版：StockRPC + Outbox Pattern）
+CreateOrder 创建订单（重构版：StockRPC + Outbox Pattern）
 
-  业务流程：
-  1. 校验商品信息（ProductRPC）
-  2. Redis Lua 原子扣减库存（StockRPC，独立库存服务）
-  3. 生成订单号（Snowflake）
-  4. 构建 Outbox 出站消息（order.created + order.delay.check）
-  5. MySQL 单事务：扣减 MySQL 库存 + 插入订单 + 写入 Outbox 消息
-  6. 若事务失败 → 回滚 Redis 库存
-  7. 返回订单号
+业务流程：
+1. 校验商品信息（ProductRPC）
+2. Redis Lua 原子扣减库存（StockRPC，独立库存服务）
+3. 生成订单号（Snowflake）
+4. 构建 Outbox 出站消息（order.created + order.delay.check）
+5. MySQL 单事务：扣减 MySQL 库存 + 插入订单 + 写入 Outbox 消息
+6. 若事务失败 → 回滚 Redis 库存
+7. 返回订单号
 
-  原子性保证：
-  - DB 事务保证 order + outbox 要么全部成功，要么全部失败
-  - StockRPC 扣减失败时不会进入 DB 事务
-  - DB 事务失败时回滚 StockRPC 的 Redis 扣减
-  - Outbox Worker 异步将消息投递到 MQ，保证消息不丢
+原子性保证：
+- DB 事务保证 order + outbox 要么全部成功，要么全部失败
+- StockRPC 扣减失败时不会进入 DB 事务
+- DB 事务失败时回滚 StockRPC 的 Redis 扣减
+- Outbox Worker 异步将消息投递到 MQ，保证消息不丢
 */
 func (s *orderServiceImpl) CreateOrder(ctx context.Context, req *pb.CreateOrderReq) (*pb.CreateOrderResp, error) {
 	startTime := time.Now()
@@ -109,12 +107,15 @@ func (s *orderServiceImpl) CreateOrder(ctx context.Context, req *pb.CreateOrderR
 	}
 
 	// 3. 生成订单号和过期时间
-	orderNo := fmt.Sprintf("ORD%d", s.snowflakeNode.Generate().Int64())
+	orderNo := newOrderNo()
 	expireMinutes := s.timeoutConfig.OrderExpireMinutes
 	if expireMinutes <= 0 {
 		expireMinutes = 30
 	}
-	expireTime := time.Now().Add(time.Duration(expireMinutes) * time.Minute)
+	// MySQL `datetime` stores whole seconds in the current schema. Normalize once
+	// before using the value in both the order row and the Outbox payload so the
+	// consumer's integrity check cannot see a one-second serialization mismatch.
+	expireTime := time.Now().Add(time.Duration(expireMinutes) * time.Minute).Truncate(time.Second)
 	totalAmount := prodResp.Product.Price * int64(req.Count)
 
 	// 4. 构建订单实体
@@ -129,6 +130,7 @@ func (s *orderServiceImpl) CreateOrder(ctx context.Context, req *pb.CreateOrderR
 
 	// 5. 构建 Outbox 出站消息
 	createMsgPayload, _ := json.Marshal(mq.OrderMsg{
+		EventID:     uuid.NewString(),
 		OrderNo:     orderNo,
 		UserID:      req.UserId,
 		ProductID:   req.ProductId,
@@ -138,6 +140,7 @@ func (s *orderServiceImpl) CreateOrder(ctx context.Context, req *pb.CreateOrderR
 	})
 
 	delayMsgPayload, _ := json.Marshal(mq.DelayOrderMsg{
+		EventID:    uuid.NewString(),
 		OrderNo:    orderNo,
 		ProductID:  req.ProductId,
 		Count:      req.Count,
@@ -150,13 +153,16 @@ func (s *orderServiceImpl) CreateOrder(ctx context.Context, req *pb.CreateOrderR
 			MessageType: repo.OutboxTypeOrderCreated,
 			Payload:     string(createMsgPayload),
 			Status:      repo.OutboxStatusPending,
+			MaxRetries:  repo.DefaultOutboxMaxRetries,
 			NextRetryAt: time.Now(),
 		},
 		{
 			MessageType: repo.OutboxTypeOrderDelay,
 			Payload:     string(delayMsgPayload),
 			Status:      repo.OutboxStatusPending,
-			NextRetryAt: time.Now().Add(time.Duration(expireMinutes) * time.Minute),
+			MaxRetries:  repo.DefaultOutboxMaxRetries,
+			// 立即投递到 RabbitMQ 延迟队列，由消息 TTL 控制到期时间。
+			NextRetryAt: time.Now(),
 		},
 	}
 
@@ -164,6 +170,8 @@ func (s *orderServiceImpl) CreateOrder(ctx context.Context, req *pb.CreateOrderR
 	err = s.repo.CreateOrderWithOutboxTx(ctx, newOrder, expireTime, req.Count, outboxRecords)
 	if err != nil {
 		metrics.OrderCreateTotal.WithLabelValues("fail").Inc()
+		logx.Errorf("order transaction failed: order_no=%s user_id=%d product_id=%d count=%d err=%+v",
+			orderNo, req.UserId, req.ProductId, req.Count, err)
 		log.Printf("CreateOrderWithOutboxTx 失败，回滚Redis库存: OrderNo=%s, Err=%v", orderNo, err)
 		if _, rollbackErr := s.stockRpc.RollbackStock(ctx, &stockclient.RollbackStockReq{
 			ProductId: req.ProductId,
@@ -176,19 +184,25 @@ func (s *orderServiceImpl) CreateOrder(ctx context.Context, req *pb.CreateOrderR
 	}
 
 	metrics.OrderCreateTotal.WithLabelValues("success").Inc()
-	metrics.MQPublishTotal.WithLabelValues("outbox", "success").Add(2) // 两条outbox消息
 
 	log.Printf("订单创建成功: OrderNo=%s, UserID=%d, ProductID=%d, Count=%d, Amount=%d",
 		orderNo, req.UserId, req.ProductId, req.Count, totalAmount)
 
 	return &pb.CreateOrderResp{
-		OrderNo:   orderNo,
+		OrderNo:    orderNo,
 		ExpireTime: expireTime.Unix(),
 	}, nil
 }
 
+// newOrderNo uses a random UUID rather than a process-local Snowflake node.
+// Order runs as multiple Deployment replicas; assigning every replica the same
+// Snowflake node ID can create duplicate order_no values in the same millisecond.
+func newOrderNo() string {
+	return "ORD" + strings.ReplaceAll(uuid.NewString(), "-", "")
+}
+
 var (
-	ErrOrderNotFound        = errors.New("订单不存在")
+	ErrOrderNotFound         = errors.New("订单不存在")
 	ErrOrderAlreadyConfirmed = errors.New("订单已确认")
 )
 

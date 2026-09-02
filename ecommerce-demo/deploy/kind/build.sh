@@ -27,6 +27,24 @@ ORDER_WORKERS=("order-delay" "order-cron" "order-dlq")
 # Output directory
 OUTPUT_DIR="$KIND_DIR/output"
 
+detect_target_arch() {
+    local docker_arch
+    docker_arch="$(docker info --format '{{.Architecture}}')"
+
+    case "$docker_arch" in
+        aarch64|arm64)
+            echo "arm64"
+            ;;
+        x86_64|amd64)
+            echo "amd64"
+            ;;
+        *)
+            log_error "Unsupported Docker architecture: $docker_arch" >&2
+            return 1
+            ;;
+    esac
+}
+
 # =============================================================================
 # Build all Go binaries
 # =============================================================================
@@ -37,9 +55,14 @@ build_binaries() {
 
     cd "$PROJECT_ROOT"
 
+    local target_arch
+    target_arch="$(detect_target_arch)"
+
     export CGO_ENABLED=0
     export GOOS=linux
-    export GOARCH=amd64
+    # Kind 节点跟随 Docker 引擎架构；不要沿用宿主环境中可能残留的 GOARCH。
+    export GOARCH="$target_arch"
+    log_info "Target platform: ${GOOS}/${GOARCH}"
 
     # Gateway
     log_info "Building gateway..."
@@ -132,6 +155,8 @@ build_docker_images() {
 
     local context_dir="$KIND_DIR/context"
     local docker_dir="$KIND_DIR/docker"
+    local target_arch
+    target_arch="$(detect_target_arch)"
 
     for svc in "${SERVICES[@]}" "${ORDER_WORKERS[@]}"; do
         log_info "Building image: ecommerce-$svc:latest"
@@ -159,7 +184,19 @@ build_docker_images() {
         fi
 
         # Build image
-        docker build -f "$docker_dir/${svc}.dockerfile" -t "ecommerce-$svc:latest" "$temp_dir"
+        # Produce a single-platform image. Disabling provenance prevents an OCI
+        # attestation index from being selected incorrectly by Kind/containerd.
+        local build_command=(docker buildx build --load)
+        if [ -n "${GO_MALL_DOCKER_BUILDER:-}" ]; then
+            build_command+=(--builder "$GO_MALL_DOCKER_BUILDER")
+        fi
+
+        "${build_command[@]}" \
+            --platform "linux/$target_arch" \
+            --provenance=false \
+            -f "$docker_dir/${svc}.dockerfile" \
+            -t "ecommerce-$svc:latest" \
+            "$temp_dir"
 
         # Cleanup
         rm -rf "$temp_dir"
@@ -177,9 +214,11 @@ build_docker_images() {
 load_into_kind() {
     log_info "Loading images into Kind cluster..."
 
+    local cluster_name="${KIND_CLUSTER_NAME:-ecommerce-cluster}"
+
     for svc in "${SERVICES[@]}" "${ORDER_WORKERS[@]}"; do
         log_info "Loading ecommerce-$svc:latest into Kind..."
-        kind load docker-image "ecommerce-$svc:latest" --name ecommerce-cluster 2>/dev/null || \
+        kind load docker-image "ecommerce-$svc:latest" --name "$cluster_name" 2>/dev/null || \
             log_warn "Kind cluster not found or not running. Run deploy-kind.sh first."
     done
 

@@ -6,11 +6,11 @@ import (
 )
 
 var (
-	ErrPaymentNotFound = ErrCode("payment_not_found")
-	ErrPaymentExpired  = ErrCode("payment_expired")
+	ErrPaymentNotFound  = ErrCode("payment_not_found")
+	ErrPaymentExpired   = ErrCode("payment_expired")
 	ErrPaymentCancelled = ErrCode("payment_cancelled")
-	ErrPaymentPaid     = ErrCode("payment_already_paid")
-	ErrInvalidStatus   = ErrCode("invalid_payment_status")
+	ErrPaymentPaid      = ErrCode("payment_already_paid")
+	ErrInvalidStatus    = ErrCode("invalid_payment_status")
 )
 
 type ErrCode string

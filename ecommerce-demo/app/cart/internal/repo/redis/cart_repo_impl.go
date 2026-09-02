@@ -137,7 +137,7 @@ func (r *cartRedisRepo) UpdateItem(ctx context.Context, userId int64, productId 
 	item.Count = count
 	item.UpdatedAt = time.Now().Unix()
 
-	newData, err := json.Marshal(item)
+	newData, err := json.Marshal(&item)
 	if err != nil {
 		return err
 	}
@@ -194,7 +194,7 @@ func (r *cartRedisRepo) SelectItem(ctx context.Context, userId int64, productId 
 	item.Selected = selected
 	item.UpdatedAt = time.Now().Unix()
 
-	newData, err := json.Marshal(item)
+	newData, err := json.Marshal(&item)
 	if err != nil {
 		return err
 	}

@@ -41,7 +41,7 @@ func (m *mockPaymentRepo) GetByOrderNo(ctx context.Context, orderNo string) (*mo
 	return nil, repo.ErrPaymentNotFound
 }
 
-func (m *mockPaymentRepo) UpdateStatus(ctx context.Context, paymentNo string, status int32, callbackData string) error {
+func (m *mockPaymentRepo) UpdateStatus(ctx context.Context, paymentNo string, status model.PaymentStatus, callbackData string) error {
 	if p, ok := m.payments[paymentNo]; ok {
 		p.Status = status
 		return nil
@@ -49,7 +49,7 @@ func (m *mockPaymentRepo) UpdateStatus(ctx context.Context, paymentNo string, st
 	return repo.ErrPaymentNotFound
 }
 
-func (m *mockPaymentRepo) UpdateStatusWithTx(ctx context.Context, paymentNo string, status int32, callbackData string) error {
+func (m *mockPaymentRepo) UpdateStatusWithTx(ctx context.Context, paymentNo string, status model.PaymentStatus, callbackData string) error {
 	return m.UpdateStatus(ctx, paymentNo, status, callbackData)
 }
 
@@ -205,8 +205,8 @@ func TestPayCallback(t *testing.T) {
 
 	// 模拟支付回调
 	callbackResp, err := svc.PayCallback(ctx, &pb.PayCallbackReq{
-		PaymentNo:   createResp.PaymentNo,
-		PayChannel:  "alipay",
+		PaymentNo:    createResp.PaymentNo,
+		PayChannel:   "alipay",
 		CallbackData: `{"trade_no":"ALIPAY123"}`,
 	})
 

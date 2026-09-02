@@ -48,11 +48,11 @@ type RateLimitConfig struct {
 
 // tokenBucket 内存令牌桶
 type tokenBucket struct {
-	rate      float64 // 每秒产生令牌数
-	burst     float64 // 桶容量
-	tokens    float64
-	lastTime  time.Time
-	mu        sync.Mutex
+	rate     float64 // 每秒产生令牌数
+	burst    float64 // 桶容量
+	tokens   float64
+	lastTime time.Time
+	mu       sync.Mutex
 }
 
 func newTokenBucket(rate, burst int) *tokenBucket {

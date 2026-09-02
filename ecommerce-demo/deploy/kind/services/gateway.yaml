@@ -59,7 +59,7 @@ data:
       Pass: "redis123456"
       DB: 0
     MysqlConf:
-      Host: mysql:3306
+      Host: mysql-write:3306
       User: root
       Password: root123456
       Database: ecommerce_demo
