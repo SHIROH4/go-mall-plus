@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	mathrand "math/rand"
 	"net/http"
 	"os"
 	"sort"
@@ -35,6 +36,7 @@ func main() {
 	concurrency := flag.Int("concurrency", envInt("CONCURRENCY", 4), "parallel workers")
 	rate := flag.Int("rate", envInt("RATE", 0), "global request rate; 0 sends as fast as possible")
 	productID := flag.Int64("product-id", int64(envInt("PRODUCT_ID", 900001)), "seeded benchmark product ID")
+	productMax := flag.Int64("product-max", int64(envInt("PRODUCT_MAX", 0)), "if >0, random product id in [1, productMax]")
 	flag.Parse()
 
 	if *requests <= 0 || *concurrency <= 0 {
@@ -62,7 +64,11 @@ func main() {
 		go func() {
 			defer workers.Done()
 			for range jobs {
-				results <- createOrder(client, *gateway, token, *productID)
+				pid := *productID
+				if *productMax > 0 {
+					pid = mathrand.Int63n(*productMax) + 1
+				}
+				results <- createOrder(client, *gateway, token, pid)
 			}
 		}()
 	}
