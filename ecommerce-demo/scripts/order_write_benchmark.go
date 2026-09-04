@@ -5,11 +5,11 @@ package main
 import (
 	"bytes"
 	"crypto/rand"
-	mathrand "math/rand"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
+	mathrand "math/rand"
 	"net/http"
 	"os"
 	"sort"
@@ -65,10 +65,10 @@ func main() {
 			defer workers.Done()
 			for range jobs {
 				pid := *productID
-			if *productMax > 0 {
-				pid = mathrand.Int63n(*productMax) + 1
-			}
-			results <- createOrder(client, *gateway, token, pid)
+				if *productMax > 0 {
+					pid = mathrand.Int63n(*productMax) + 1
+				}
+				results <- createOrder(client, *gateway, token, pid)
 			}
 		}()
 	}
